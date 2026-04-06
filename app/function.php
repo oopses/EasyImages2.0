@@ -73,6 +73,36 @@ function is_Gif_Webp_Animated($src)
 
 
 /**
+ * OIDC 登录验证（绕过密码检查）
+ * @param $user String 登录用户名
+ * 返回参数解析 code=>状态码 200成功，400失败; 登录用户级别level => 0无状态, 1管理员, 2上传者, messege => 提示信息
+ */
+function _login_oidc($user = null)
+{
+    global $config;
+    global $guestConfig;
+
+    // 验证用户是否存在
+    if ($user === $config['user']) {
+        // 管理员登录 - OIDC 认证成功，直接设置登录状态
+        $browser_cookie = json_encode(array($user, bin2hex(random_bytes(16))));
+        setcookie('auth', $browser_cookie, time() + 3600 * 24 * 14, '/');
+        return json_encode(array('code' => 200, 'level' => 1, 'messege' => '管理员 OIDC 登录成功'));
+    } elseif (array_key_exists($user, $guestConfig)) {
+        // 来宾用户登录 - OIDC 认证成功，直接设置登录状态
+        // 检查用户是否过期
+        if ($guestConfig[$user]['expired'] < time()) {
+            return json_encode(array('code' => 400, 'level' => 0, 'messege' => $user . '账号已过期'));
+        }
+        $browser_cookie = json_encode(array($user, bin2hex(random_bytes(16))));
+        setcookie('auth', $browser_cookie, time() + 3600 * 24 * 14, '/');
+        return json_encode(array('code' => 200, 'level' => 2, 'messege' => $user . '用户 OIDC 登录成功'));
+    } else {
+        return json_encode(array('code' => 400, 'level' => 0, 'messege' => '用户不存在'));
+    }
+}
+
+/**
  * 2023-01-06 校验登录
  * @param $user String 登录用户名
  * @param $password 登录密码
@@ -98,18 +128,37 @@ function _login($user = null, $password = null)
             if (!$browser_cookie || !is_array($browser_cookie) || count($browser_cookie) < 2) return json_encode(array('code' => 400, 'level' => 0, 'messege' => '登录已过期,请重新登录'));
             // 判断账号是否存在
             if ($browser_cookie[0] !== $config['user'] && !array_key_exists($browser_cookie[0], $guestConfig)) return json_encode(array('code' => 400, 'level' => 0, 'messege' => '账号不存在'));
-            // 判断是否管理员
-            if ($browser_cookie[0] === $config['user'] && $browser_cookie[1] === $config['password']) return json_encode(array('code' => 200, 'level' => 1, 'messege' => '尊敬的管理员'));
-            // 判断是否上传者
-            if (array_key_exists($browser_cookie[0], $guestConfig) && $browser_cookie[1] === $guestConfig[$browser_cookie[0]]['password']) {
-                // 判断上传者是否过期
-                if ($guestConfig[$browser_cookie[0]]['expired'] < time()) {
-                    // 上传者账户密码正确,但是账户过期
-                    return json_encode(array('code' => 400, 'level' => 0, 'messege' => $browser_cookie[0] . '账号已过期'));
+
+            // 检查是否为 OIDC 登录（随机令牌格式：32位十六进制）
+            $is_oidc_token = preg_match('/^[a-f0-9]{32}$/', $browser_cookie[1]);
+
+            if ($is_oidc_token) {
+                // OIDC 登录验证
+                if ($browser_cookie[0] === $config['user']) {
+                    return json_encode(array('code' => 200, 'level' => 1, 'messege' => '尊敬的管理员'));
+                } elseif (array_key_exists($browser_cookie[0], $guestConfig)) {
+                    // 判断上传者是否过期
+                    if ($guestConfig[$browser_cookie[0]]['expired'] < time()) {
+                        return json_encode(array('code' => 400, 'level' => 0, 'messege' => $browser_cookie[0] . '账号已过期'));
+                    }
+                    return json_encode(array('code' => 200, 'level' => 2, 'messege' => $browser_cookie[0] . '用户已登录'));
                 }
-                return json_encode(array('code' => 200, 'level' => 2, 'messege' => $browser_cookie[0] . '用户已登录'));
+            } else {
+                // 传统密码登录验证
+                // 判断是否管理员
+                if ($browser_cookie[0] === $config['user'] && $browser_cookie[1] === $config['password']) return json_encode(array('code' => 200, 'level' => 1, 'messege' => '尊敬的管理员'));
+                // 判断是否上传者
+                if (array_key_exists($browser_cookie[0], $guestConfig) && $browser_cookie[1] === $guestConfig[$browser_cookie[0]]['password']) {
+                    // 判断上传者是否过期
+                    if ($guestConfig[$browser_cookie[0]]['expired'] < time()) {
+                        // 上传者账户密码正确,但是账户过期
+                        return json_encode(array('code' => 400, 'level' => 0, 'messege' => $browser_cookie[0] . '账号已过期'));
+                    }
+                    return json_encode(array('code' => 200, 'level' => 2, 'messege' => $browser_cookie[0] . '用户已登录'));
+                }
             }
-            // 账号存在,密码错误
+
+            // 账号存在,但验证失败
             if ($browser_cookie[0] === $config['user'] || array_key_exists($browser_cookie[0], $guestConfig)) return json_encode(array('code' => 400, 'level' => 0, 'messege' => '密码错误'));
         }
     }
@@ -168,23 +217,40 @@ function checkLogin()
             return 202;
         }
 
-        // 密码错误
-        if ($getCOK[1] !== $config['password'] && $getCOK[1] !== $guestConfig[$getCOK[0]]['password']) {
-            return 203;
-        }
+        // 检查是否为 OIDC 登录（随机令牌格式：32位十六进制）
+        $is_oidc_token = preg_match('/^[a-f0-9]{32}$/', $getCOK[1]);
 
-        // 管理员登陆
-        if ($getCOK[0] === $config['user'] && $getCOK[1] === $config['password']) {
-            return 204;
-        }
-
-        // 上传者账号登陆
-        if ($getCOK[1] === $guestConfig[$getCOK[0]]['password']) {
-            if ($guestConfig[$getCOK[0]]['expired'] < time()) {
-                // 上传者账号过期
-                return 206;
+        if ($is_oidc_token) {
+            // OIDC 登录验证
+            if ($getCOK[0] === $config['user']) {
+                return 204; // 管理员
+            } elseif (array_key_exists($getCOK[0], $guestConfig)) {
+                if ($guestConfig[$getCOK[0]]['expired'] < time()) {
+                    return 206; // 账号过期
+                }
+                return 205; // 上传者
             }
-            return 205;
+            return 203; // 密码错误（实际上是无效的 OIDC 令牌）
+        } else {
+            // 传统密码登录验证
+            // 密码错误
+            if ($getCOK[1] !== $config['password'] && $getCOK[1] !== $guestConfig[$getCOK[0]]['password']) {
+                return 203;
+            }
+
+            // 管理员登陆
+            if ($getCOK[0] === $config['user'] && $getCOK[1] === $config['password']) {
+                return 204;
+            }
+
+            // 上传者账号登陆
+            if ($getCOK[1] === $guestConfig[$getCOK[0]]['password']) {
+                if ($guestConfig[$getCOK[0]]['expired'] < time()) {
+                    // 上传者账号过期
+                    return 206;
+                }
+                return 205;
+            }
         }
     }
 }

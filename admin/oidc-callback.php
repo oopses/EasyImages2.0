@@ -99,25 +99,11 @@ try {
     }
     
     // 使用匹配的用户进行登录
-    if ($matchedUser === $config['user']) {
-        // 管理员登录
-        $loginResult = json_decode(_login($config['user'], $config['password']), true);
-    } else {
-        // 来宾用户登录
-        $guestPassword = $guestConfig[$matchedUser]['password'] ?? null;
-        if (empty($guestPassword)) {
-            throw new Exception("Guest user exists but no password configured");
-        }
-        $loginResult = json_decode(_login($matchedUser, $guestPassword), true);
-    }
+    $loginResult = json_decode(_login_oidc($matchedUser), true);
     
     if ($loginResult['code'] !== 200) {
-        throw new Exception('Login failed: ' . $loginResult['messege']);
+        throw new Exception('OIDC Login failed: ' . $loginResult['messege']);
     }
-    
-    // 设置 cookie - 使用匹配到的本地用户名
-    $browser_cookie = json_encode(array($matchedUser, bin2hex(random_bytes(16))));
-    setcookie('auth', $browser_cookie, time() + 3600 * 24 * 14, '/');
     
     // 记录登录 - 使用匹配到的本地用户名
     @write_login_log($matchedUser, 'OIDC', 'OIDC login success');
