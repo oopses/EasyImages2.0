@@ -1,15 +1,27 @@
 # OIDC 配置文件（包含敏感信息，不应提交到版本控制）
 /config/oidc.php
+/config/oidc.local.php
+
+# 本地配置文件（包含敏感信息）
+/config/config.local.php
 
 # 其他敏感配置
 /config/config.guest.php
 /config/api_key.php
+
+# 工作区配置文件（敏感信息）
+/home/workspace/config/
+
+# 部署脚本和生成的文件
+/deploy.sh
+/easyimages-config-*.zip
 
 # 缓存和临时文件
 /i/cache/
 
 # 日志文件
 *.log
+/admin/logs/
 
 # IDE 文件
 .vscode/

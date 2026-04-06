@@ -41,10 +41,25 @@ try {
     
     // 映射用户信息
     $mapping = $oidcConfig['user_mapping'];
-    $username = $userInfo[$mapping['preferred_username']] ?? null;
+    $usernameField = $mapping['preferred_username'];
+    $username = $userInfo[$usernameField] ?? null;
+    
+    // 如果主字段不存在，尝试其他可能的字段
+    if (empty($username)) {
+        // 尝试常见的备选字段名
+        $possibleFields = array('sub', 'user_id', 'login', 'name', 'email', 'username', 'preferred_username');
+        foreach ($possibleFields as $field) {
+            if (!empty($userInfo[$field])) {
+                $username = $userInfo[$field];
+                break;
+            }
+        }
+    }
     
     if (empty($username)) {
-        throw new Exception('Cannot get username from OIDC user info');
+        // 列出所有可用字段供调试
+        $availableFields = implode(', ', array_keys($userInfo));
+        throw new Exception('Cannot get username from OIDC user info. Available fields: ' . $availableFields);
     }
     
     // 检查用户白名单
@@ -55,35 +70,57 @@ try {
     // 检查或创建用户
     global $config, $guestConfig;
     
+    // 尝试多种方式匹配用户
+    $matchedUser = null;
+    
+    // 方式1：直接用户名匹配
     if ($username === $config['user']) {
-        // 管理员登录 - 使用默认级别
-        $loginResult = json_decode(_login($config['user'], $config['password']), true);
+        $matchedUser = $config['user'];
     } else if (array_key_exists($username, $guestConfig)) {
-        // 已存在的上传者
-        $loginResult = json_decode(_login($username, $guestConfig[$username]['password']), true);
-    } else if ($oidcConfig['auto_create_user']) {
-        // 自动创建用户（仅适用于上传者权限）
-        // 这里生成一个临时密码，实际使用中应该跳过本地密码验证
-        $tempPassword = bin2hex(random_bytes(16));
-        $loginResult = array(
-            'code' => 200,
-            'level' => $oidcConfig['default_level'],
-            'messege' => 'OIDC login success'
-        );
+        $matchedUser = $username;
+    }
+    
+    // 方式2：如果主字段匹配失败，尝试按邮箱匹配
+    if (empty($matchedUser) && !empty($userInfo['email'])) {
+        $email = $userInfo['email'];
+        
+        // 检查来宾用户邮箱
+        foreach ($guestConfig as $guestUsername => $guestInfo) {
+            if (isset($guestInfo['email']) && $guestInfo['email'] === $email) {
+                $matchedUser = $guestUsername;
+                break;
+            }
+        }
+    }
+    
+    if (empty($matchedUser)) {
+        $debugInfo = "OIDC user: $username, Email: " . ($userInfo['email'] ?? 'N/A');
+        throw new Exception("User not found: $debugInfo");
+    }
+    
+    // 使用匹配的用户进行登录
+    if ($matchedUser === $config['user']) {
+        // 管理员登录
+        $loginResult = json_decode(_login($config['user'], $config['password']), true);
     } else {
-        throw new Exception('User not found and auto_create_user is disabled');
+        // 来宾用户登录
+        $guestPassword = $guestConfig[$matchedUser]['password'] ?? null;
+        if (empty($guestPassword)) {
+            throw new Exception("Guest user exists but no password configured");
+        }
+        $loginResult = json_decode(_login($matchedUser, $guestPassword), true);
     }
     
     if ($loginResult['code'] !== 200) {
         throw new Exception('Login failed: ' . $loginResult['messege']);
     }
     
-    // 设置 cookie
-    $browser_cookie = json_encode(array($username, bin2hex(random_bytes(16))));
+    // 设置 cookie - 使用匹配到的本地用户名
+    $browser_cookie = json_encode(array($matchedUser, bin2hex(random_bytes(16))));
     setcookie('auth', $browser_cookie, time() + 3600 * 24 * 14, '/');
     
-    // 记录登录
-    @write_login_log($username, 'OIDC', 'OIDC login success');
+    // 记录登录 - 使用匹配到的本地用户名
+    @write_login_log($matchedUser, 'OIDC', 'OIDC login success');
     
     // 重定向回首页
     header('Location: ' . $config['domain']);

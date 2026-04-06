@@ -130,7 +130,7 @@ if (!empty($login_script)) echo "<script>" . $login_script . "</script>";
                     if (file_exists(APP_ROOT . '/config/oidc.php')) {
                         $oidcConfig = require APP_ROOT . '/config/oidc.php';
                         if (!empty($oidcConfig['enabled'])) {
-                            echo '<a href="?oidc_login=1" class="btn btn-block btn-info" style="margin-top: 10px;"><i class="icon icon-sign-in"></i> ' . htmlspecialchars($oidcConfig['provider']['name']) . ' 登录</a>';
+                            echo '<a href="?oidc_login=1" class="btn btn-block btn-info" style="margin-top: 10px;"><i class="icon icon-sign-in"></i> ' . htmlspecialchars($oidcConfig['provider']['name']) . '</a>';
                         }
                     }
                     ?>

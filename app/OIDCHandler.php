@@ -101,13 +101,27 @@ class OIDCHandler {
         
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
         curl_close($ch);
+        
+        if (!empty($curlError)) {
+            throw new Exception('curl error: ' . $curlError);
+        }
         
         if ($httpCode !== 200) {
             return false;
         }
         
-        return json_decode($response, true);
+        $tokenData = json_decode($response, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception('Invalid JSON response from token endpoint');
+        }
+        
+        if (!empty($tokenData['error'])) {
+            throw new Exception('Token endpoint error: ' . $tokenData['error'] . ' - ' . ($tokenData['error_description'] ?? ''));
+        }
+        
+        return $tokenData;
     }
     
     /**
@@ -129,13 +143,27 @@ class OIDCHandler {
         
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
         curl_close($ch);
+        
+        if (!empty($curlError)) {
+            throw new Exception('curl error: ' . $curlError);
+        }
         
         if ($httpCode !== 200) {
             return false;
         }
         
-        return json_decode($response, true);
+        $userInfoData = json_decode($response, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception('Invalid JSON response from userinfo endpoint');
+        }
+        
+        if (!empty($userInfoData['error'])) {
+            throw new Exception('UserInfo endpoint error: ' . $userInfoData['error']);
+        }
+        
+        return $userInfoData;
     }
     
     /**
