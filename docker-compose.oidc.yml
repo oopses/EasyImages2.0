@@ -1,0 +1,64 @@
+# Docker Compose 示例 - 使用 OIDC 认证的 EasyImages
+
+version: '3.8'
+
+services:
+  easyimages:
+    image: easyimages:latest
+    # 或使用你的 Docker 镜像
+    # build: .
+    
+    ports:
+      - "80:80"
+      - "443:443"
+    
+    volumes:
+      # 挂载上传存储目录
+      - ./i:/var/www/html/i
+      
+      # 挂载配置目录（可选）
+      - ./config:/var/www/html/config
+    
+    environment:
+      # OIDC 配置
+      OIDC_ENABLED: "true"
+      OIDC_PROVIDER_NAME: "Company SSO"
+      
+      # 你的 OIDC 服务器端点
+      OIDC_AUTH_ENDPOINT: "https://oidc.company.com/oauth/authorize"
+      OIDC_TOKEN_ENDPOINT: "https://oidc.company.com/oauth/token"
+      OIDC_USERINFO_ENDPOINT: "https://oidc.company.com/oauth/userinfo"
+      OIDC_JWKS_URI: "https://oidc.company.com/oauth/discovery/keys"
+      
+      # 应用凭证（从你的 OIDC 提供商获取）
+      OIDC_CLIENT_ID: "${OIDC_CLIENT_ID}"          # 从 .env 文件读取
+      OIDC_CLIENT_SECRET: "${OIDC_CLIENT_SECRET}"  # 从 .env 文件读取
+      
+      # 回调 URI
+      OIDC_REDIRECT_URI: "https://easyimages.company.com/admin/oidc-callback.php"
+      
+      # 权限配置
+      OIDC_DEFAULT_LEVEL: "2"
+      OIDC_AUTO_CREATE_USER: "false"
+      
+      # 用户白名单
+      OIDC_WHITELIST: "admin@company.com,user@company.com"
+      
+      # 其他应用配置
+      TZ: "Asia/Shanghai"
+    
+    restart: unless-stopped
+    
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# 网络配置（可选）
+networks:
+  default:
+    name: easyimages_network
+    driver: bridge

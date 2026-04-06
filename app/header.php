@@ -9,9 +9,9 @@
 	<meta name="force-rendering" content="webkit" />
 	<meta name="author" content="Icret EasyImage2.0">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title><?php echo $config['title']; ?></title>
-	<meta name="keywords" content="<?php echo $config['keywords']; ?>" />
-	<meta name="description" content="<?php echo $config['description']; ?>" />
+	<title><?php echo htmlspecialchars($config['title'], ENT_QUOTES, 'UTF-8'); ?></title>
+	<meta name="keywords" content="<?php echo htmlspecialchars($config['keywords'], ENT_QUOTES, 'UTF-8'); ?>" />
+	<meta name="description" content="<?php echo htmlspecialchars($config['description'], ENT_QUOTES, 'UTF-8'); ?>" />
 	<link rel="shortcut icon" type="image/x-icon" href="<?php static_cdn(); ?>/favicon.ico" />
 	<link rel="stylesheet" href="<?php static_cdn(); ?>/public/static/zui/css/zui.min.css">
 	<link rel="stylesheet" href="<?php static_cdn(); ?>/public/static/nprogress/nprogress.min.css">
@@ -50,7 +50,7 @@
 				<?php endif; ?>
 				<?php /** 账号登录 */ if (is_who_login('status')) : ?>
 					<!-- 右侧的导航项目 -->
-					<li class="nav navbar-nav navbar-right hidden-xs"><a href="<?php echo $config['domain']; ?>/admin/index.php?login=logout">您好：<?php echo json_decode($_COOKIE['auth'])[0]; ?> <i class="icon icon-signout"></i></a></li>
+					<li class="nav navbar-nav navbar-right hidden-xs"><a href="<?php echo $config['domain']; ?>/admin/index.php?login=logout">您好：<?php echo htmlspecialchars(json_decode($_COOKIE['auth'])[0], ENT_QUOTES, 'UTF-8'); ?> <i class="icon icon-signout"></i></a></li>
 				<?php else : ?>
 					<li class="nav navbar-nav navbar-right hidden-xs"><a href="<?php echo $config['domain']; ?>/admin/index.php"><i class="icon icon-user"> 登录</i></a></li>
 				<?php endif; ?>

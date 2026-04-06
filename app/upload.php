@@ -93,7 +93,7 @@ if ($handle->uploaded) {
     // 检查svg是否存在script和a标签代码
     if ($handle->file_src_name_ext === 'svg') {
         $svg = file_get_contents($handle->file_src_pathname);
-        if (preg_match('/<script[\s\S]*?<\/script>/', $svg) || stripos($svg, 'href=')) {
+        if (preg_match('/<script[\s\S]*?<\/script>/i', $svg) || preg_match('/<a[\s\S]*?<\/a>/i', $svg) || preg_match('/javascript:/i', $svg) || preg_match('/on\w+="[^"]*"/i', $svg)) {
             exit(json_encode(
                 array(
                     "result"  => "failed",

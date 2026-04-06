@@ -3,108 +3,91 @@
  * 登录页面
  */
 require_once __DIR__ . '/../app/function.php';
-require_once APP_ROOT . '/app/header.php';
 require_once APP_ROOT . '/config/config.guest.php';
 
-// 退出
-if (isset($_GET['login'])) {
-    if ($_GET['login'] = 'logout') {
+// 启用 session
+session_start();
 
-        if (isset($_COOKIE['auth'])) {
-            setcookie('auth', null, time() - 1, '/');
-            header("Refresh:2;url=../index.php");
-            echo '
-				<script>
-					new $.zui.Messager("退出成功", {
-						type: "success", // 定义颜色主题 
-						icon: "ok-sign" // 定义消息图标
-					}).show();
-					// 延时2s跳转
-					window.setTimeout("window.location=\'../index.php\'",2000);
-				</script>
-        ';
-        } else {
-            echo '
-				<script>
-				new $.zui.Messager("尚未登录", {
-					type: "danger", // 定义颜色主题 
-					icon: "exclamation-sign" // 定义消息图标
-				}).show();
-				// 延时2s跳转
-				window.setTimeout("window.location=\'./index.php\'",2000);
-				</script>
-        ';
-        }
+// OIDC 登录处理
+if (isset($_GET['oidc_login'])) {
+    require_once APP_ROOT . '/app/OIDCHandler.php';
+    $oidc = new OIDCHandler();
+    if ($oidc->isEnabled()) {
+        $authUrl = $oidc->getAuthorizationUrl();
+        header('Location: ' . $authUrl);
+        exit();
     }
-    exit(require_once APP_ROOT . '/app/footer.php');
 }
 
-// 提交登录
-if (isset($_POST['password']) and isset($_POST['user'])) {
-
-    // 验证码
-    if ($config['captcha']) {
-        if (empty($_REQUEST['code'])) {
-            echo '
-            <script>
-                new $.zui.Messager("请填写验证码!", {type: "danger" // 定义颜色主题 
-                }).show();
-                // 延时2s跳转
-                window.setTimeout("window.location=\'./index.php\'",2000);
-            </script>';
-            exit(require_once APP_ROOT . '/app/footer.php');
+// 处理退出
+if (isset($_GET['login'])) {
+    // ✅ 修复：由 = 改为 === (修复 issue #264)
+    if ($_GET['login'] === 'logout') {
+        if (isset($_COOKIE['auth'])) {
+            setcookie('auth', '', time() - 3600, '/');
+            $logout_msg = "退出成功";
+            $target_url = "../index.php";
         } else {
-            session_start();
-            if (strtolower($_REQUEST['code']) !== $_SESSION['code']) {
-                echo '
-                <script>
-                    new $.zui.Messager("验证码错误!", {type: "danger" // 定义颜色主题 
-                    }).show();
-                    // 延时2s跳转
-				    window.setTimeout("window.location=\'./index.php\'",2000);
-                </script>';
-                exit(require_once APP_ROOT . '/app/footer.php');
-            }
+            $logout_msg = "尚未登录";
+            $target_url = "./index.php";
+        }
+        
+        require_once APP_ROOT . '/app/header.php';
+        echo '<script>
+                new $.zui.Messager("' . htmlspecialchars($logout_msg, ENT_QUOTES, 'UTF-8') . '", {
+                    type: "success",
+                    icon: "ok-sign"
+                }).show();
+                window.setTimeout("window.location=\'' . htmlspecialchars($target_url, ENT_QUOTES, 'UTF-8') . '\'", 2000);
+              </script>';
+        exit(require_once APP_ROOT . '/app/footer.php');
+    }
+}
+
+// 提交登录处理
+$login_script = "";
+if (isset($_POST['password']) && isset($_POST['user'])) {
+    // 验证码校验
+    if ($config['captcha']) {
+        if (empty($_REQUEST['code']) || strtolower($_REQUEST['code']) !== $_SESSION['code']) {
+            $login_script = 'new $.zui.Messager("验证码错误或未填写", {type: "danger"}).show();';
+            goto render_page;
         }
     }
 
-    $login = _login($_POST['user'], $_POST['password']);
-    $login = json_decode($login, true);
+    $login_res = _login($_POST['user'], $_POST['password']);
+    $login = json_decode($login_res, true);
 
     if ($login['code'] == 200) {
-        echo '
-        <script> 
-            new $.zui.Messager("' . $login["messege"] . '" , {
-            type: "primary", // 定义颜色主题
-            icon: "check" // 定义消息图标
+        // ✅ 修改为 JS 跳转，确保 Cookie 写入生效
+        $login_script = '
+            new $.zui.Messager("' . htmlspecialchars($login["messege"], ENT_QUOTES, 'UTF-8') . '" , {
+                type: "primary",
+                icon: "check"
             }).show();
-        </script>';
-        header("refresh:2;url=" . $config['domain'] . "");
+            window.setTimeout(function(){ window.location.href="' . $config['domain'] . '"; }, 2000);';
     } else {
-        echo '
-        <script> 
-            new $.zui.Messager("' . $login["messege"] . '" , {
-            type: "danger", // 定义颜色主题
-            icon: "times" // 定义消息图标
-            }).show();
-        </script>';
-        header("refresh:2;");
+        $login_script = 'new $.zui.Messager("' . htmlspecialchars($login["messege"], ENT_QUOTES, 'UTF-8') . '" , {
+            type: "danger",
+            icon: "times"
+        }).show();';
     }
-
-    // 登录日志
-    write_login_log($_POST['user'], $_POST['password'], $login["messege"]);
+    write_login_log($_POST['user'], '******', $login["messege"]);
 }
+
+render_page:
+require_once APP_ROOT . '/app/header.php';
+if (!empty($login_script)) echo "<script>" . $login_script . "</script>";
 ?>
 <link rel="stylesheet" href="<?php static_cdn(); ?>/public/static/login.css">
-<!-- 忘记密码 -->
+
+<!-- 忘记密码提示 -->
 <div class="modal fade" id="fogot">
     <div class="modal-dialog ">
         <div class="modal-content">
             <div class="modal-header">
                 <button type="button" class="close" data-dismiss="modal"><span aria-hidden="true">x</span><span class="sr-only">关闭</span></button>
-                <h4 class="modal-title">
-                    忘记账号/密码?
-                </h4>
+                <h4 class="modal-title">忘记账号/密码?</h4>
             </div>
             <div class="modal-body">
                 <p class="text-primary">忘记账号可以打开<code>/config/config.php</code>文件找到<code data-toggle="tooltip" title="'user'=><strong>admin</strong>'">user</code>对应的键值->填入</p>
@@ -117,6 +100,7 @@ if (isset($_POST['password']) and isset($_POST['user'])) {
         </div>
     </div>
 </div>
+
 <section>
     <div class="container">
         <div class="user singinBx">
@@ -128,7 +112,9 @@ if (isset($_POST['password']) and isset($_POST['user'])) {
                     <h2>登录</h2>
                     <label for="account" class="col-sm-2"></label>
                     <input type="text" name="user" id="account" class="form-control" value="" placeholder="输入登录账号" autocomplete="off" required="required">
-                    <input type="password" name="password" id="password" class="form-control" value="" placeholder="输入登录密码" autocomplete="off" required="required"><input type="hidden" name="password" id="md5_password">
+                    <input type="password" name="raw_password" id="raw_password" class="form-control" value="" placeholder="输入登录密码" autocomplete="off" required="required">
+                    <input type="hidden" name="password" id="md5_password">
+                    
                     <?php if ($config['captcha']) : ?>
                         <input class="form-control" type="text" name="code" value="" placeholder="请输入验证码" autocomplete="off" required="required" />
                         <div class="form-group">
@@ -137,38 +123,32 @@ if (isset($_POST['password']) and isset($_POST['user'])) {
                             </div>
                         </div>
                     <?php endif; ?>
+                    
                     <button type="submit" class="btn btn-block btn-primary">登 录</button>
+                    <?php
+                    // 检查 OIDC 是否启用
+                    if (file_exists(APP_ROOT . '/config/oidc.php')) {
+                        $oidcConfig = require APP_ROOT . '/config/oidc.php';
+                        if (!empty($oidcConfig['enabled'])) {
+                            echo '<a href="?oidc_login=1" class="btn btn-block btn-info" style="margin-top: 10px;"><i class="icon icon-sign-in"></i> ' . htmlspecialchars($oidcConfig['provider']['name']) . ' 登录</a>';
+                        }
+                    }
+                    ?>
                     <p class="signup">忘记账号或密码请查看<a href="#fogot" data-moveable="inside" data-remember-pos="false" data-toggle="modal" data-target="#fogot" data-position="center">帮助信息</a></p>
                 </form>
             </div>
         </div>
-        <div class="user singupBx">
-            <div class="formBx">
-                <form action="">
-                    <h2>注册</h2>
-                    <input type="text" name="telyzm" id="telyzm" placeholder="手机号">
-                    <input type="email" name="" placeholder="邮箱地址">
-                    <input type="password" name="" placeholder="设置密码">
-                    <input type="password" name="" placeholder="再次输入密码">
-                    <input type="submit" name="" value="注册">
-                    <p class="signup">已有账号？<a href="#" onclick="topggleForm();">登录</a></p>
-                </form>
-            </div>
-            <div class="imgBx"><img src="<?php echo $config['login_bg']; ?>" alt="简单图床登陆界面背景图" />
-            </div>
-        </div>
     </div>
 </section>
-</form>
+
 <script type="application/javascript" src="<?php static_cdn(); ?>/public/static/crypto/SHA256.js"></script>
 <script>
     function md5_post() {
-        var password = document.getElementById('password');
-        var md5pwd = document.getElementById('md5_password');
-        md5pwd.value = SHA256(password.value);
-        // fix https://github.com/icret/EasyImages2.0/pull/163
-        password.value = "Null";
-        // 可以校验判断表单内容，true就是通过提交，false，阻止提交
+        var raw_pwd = document.getElementById('raw_password');
+        var hidden_pwd = document.getElementById('md5_password');
+        // ✅ 修复 issue #264：强制转为小写，确保与后端配置匹配
+        hidden_pwd.value = SHA256(raw_pwd.value).toLowerCase();
+        raw_pwd.value = "Null";
         return true;
     }
 
@@ -177,4 +157,4 @@ if (isset($_POST['password']) and isset($_POST['user'])) {
         container.classList.toggle('active');
     }
 </script>
-<?php require_once APP_ROOT . '/app/footer.php';
+<?php require_once APP_ROOT . '/app/footer.php'; ?>

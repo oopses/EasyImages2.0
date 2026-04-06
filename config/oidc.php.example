@@ -1,0 +1,65 @@
+<?php
+/**
+ * OIDC 配置示例
+ * 请复制此文件为 oidc.php 并填入你的配置信息
+ * 该文件已在 .gitignore 中，不会被提交到版本控制
+ * 
+ * 关于 OIDC：https://docs.next-terminal.typesafe.cn/zh/usage/oidc_server.html
+ */
+
+return array(
+    // 是否启用 OIDC
+    'enabled' => false,
+    
+    // OIDC 提供商信息
+    'provider' => array(
+        // 提供商名称（显示在登录按钮）
+        'name' => 'My OIDC',
+        
+        // Authorization Endpoint
+        'authorization_endpoint' => 'https://your-oidc-server.com/oauth/authorize',
+        
+        // Token Endpoint
+        'token_endpoint' => 'https://your-oidc-server.com/oauth/token',
+        
+        // UserInfo Endpoint
+        'userinfo_endpoint' => 'https://your-oidc-server.com/oauth/userinfo',
+        
+        // JWKS URI (用于验证 ID Token)
+        'jwks_uri' => 'https://your-oidc-server.com/oauth/discovery/keys',
+    ),
+    
+    // 应用配置
+    'client' => array(
+        // Client ID
+        'id' => 'your_client_id_here',
+        
+        // Client Secret (保密！勿在前端使用)
+        'secret' => 'your_client_secret_here',
+        
+        // Redirect URI (必须与 OIDC 提供商配置一致)
+        'redirect_uri' => 'http://127.0.0.1/admin/oidc-callback.php',
+    ),
+    
+    // 作用域
+    'scopes' => array('openid', 'profile', 'email'),
+    
+    // 用户映射（OIDC 返回字段到本地用户的映射）
+    'user_mapping' => array(
+        // OIDC 中的字段名 => 本地用户信息
+        'preferred_username' => 'user',  // 或使用 'sub' 或 'email'
+        'email' => 'email',
+    ),
+    
+    // OIDC 用户权限级别 (1=管理员, 2=上传者)
+    'default_level' => 2,
+    
+    // 是否自动创建不存在的用户
+    'auto_create_user' => false,
+    
+    // 用户白名单（留空表示允许所有登录的用户）
+    'user_whitelist' => array(
+        // 'allowed_user1',
+        // 'allowed_user2@example.com',
+    ),
+);

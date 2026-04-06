@@ -92,10 +92,10 @@ function _login($user = null, $password = null)
         }
         // 存在cookie
         if (isset($_COOKIE['auth'])) {
-            $browser_cookie = json_decode($_COOKIE['auth']);
+            $browser_cookie = json_decode($_COOKIE['auth'], true);
 
             // cookie无法读取
-            if (!$browser_cookie) return json_encode(array('code' => 400, 'level' => 0, 'messege' => '登录已过期,请重新登录'));
+            if (!$browser_cookie || !is_array($browser_cookie) || count($browser_cookie) < 2) return json_encode(array('code' => 400, 'level' => 0, 'messege' => '登录已过期,请重新登录'));
             // 判断账号是否存在
             if ($browser_cookie[0] !== $config['user'] && !array_key_exists($browser_cookie[0], $guestConfig)) return json_encode(array('code' => 400, 'level' => 0, 'messege' => '账号不存在'));
             // 判断是否管理员
@@ -202,7 +202,7 @@ function mustLogin()
         if ($status['code'] === 200) {
             echo '
             <script> 
-                new $.zui.Messager("' . $status["messege"] . '", {
+                new $.zui.Messager("' . addslashes(htmlspecialchars($status["messege"], ENT_QUOTES, 'UTF-8')) . '", {
                 type: "success", // 定义颜色主题 
                 icon: "linux", // 定义消息图标
                 placement:"bottom-right" // 消息位置
@@ -213,7 +213,7 @@ function mustLogin()
         if ($status['code'] === 400) {
             echo '
             <script>
-                new $.zui.Messager("' . $status["messege"] . '", {
+                new $.zui.Messager("' . addslashes(htmlspecialchars($status["messege"], ENT_QUOTES, 'UTF-8')) . '", {
                 type: "danger", // 定义颜色主题 
                 icon: "bullhorn" // 定义消息图标
             }).show();
@@ -287,7 +287,9 @@ function imgName($source = null)
             break;
         case "source":
             // 以上传文件名称 例：微信图片_20211228214754
-            // 过滤非法名称 $source = preg_replace("/\/|\~|\!|\@|\#|\\$|\%|\^|\&|\*|\(|\)|\_|\+|\{|\}|\:|\<|\>|\?|\[|\]|\,|\.|\/|\;|\'|\`|\-|\=|\\\|\|/","",$source);
+            // 过滤非法名称，防止路径遍历
+            $source = preg_replace("/[\/\\~!@#$%^&*()_+{}:<>?[\],.;'`\-\=\\\\|]/", "", $source);
+            $source = basename($source); // 确保只有文件名部分
             return $source;
             break;
         case "date":
@@ -593,6 +595,13 @@ function getDel($url, $type)
         $url = APP_ROOT . $url;
     }
 
+    // 防止路径遍历攻击
+    $realPath = realpath($url);
+    $allowedPath = realpath(APP_ROOT . $config['path']);
+    if ($realPath === false || strpos($realPath, $allowedPath) !== 0) {
+        return FALSE;
+    }
+
     // 文件是否存在 限制删除目录
     if (is_file($url) && strrpos($url, $config['path'])) {
         // 执行删除
@@ -622,6 +631,13 @@ function easyimage_delete($url, $type)
     }
     if ($type == 'hash') {
         $url = APP_ROOT . $url;
+    }
+
+    // 防止路径遍历攻击
+    $realPath = realpath($url);
+    $allowedPath = realpath(APP_ROOT . $config['path']);
+    if ($realPath === false || strpos($realPath, $allowedPath) !== 0) {
+        return FALSE;
     }
 
     // 文件是否存在 限制删除目录
