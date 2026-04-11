@@ -46,6 +46,31 @@ if (empty($_POST['sign']) || time() - $_POST['sign'] > 12306) {
     ));
 }
 
+// 处理过期时间参数
+$expiration = null;
+$custom_expire_time = null;
+if ($config['image_expiration_enable']) {
+    $expiration = isset($_POST['expiration']) ? $_POST['expiration'] : $config['image_expiration_default'];
+
+    // 处理自定义时间格式 (custom:YYYY-MM-DDTHH:MM)
+    if (strpos($expiration, 'custom:') === 0) {
+        $custom_time = substr($expiration, 7); // 移除 'custom:' 前缀
+        $custom_timestamp = strtotime($custom_time);
+        if ($custom_timestamp && $custom_timestamp > time()) {
+            $custom_expire_time = $custom_timestamp;
+            $expiration = 'custom';
+        } else {
+            // 无效的自定义时间，使用默认值
+            $expiration = $config['image_expiration_default'];
+        }
+    }
+
+    // 验证过期时间选项是否有效
+    if (!array_key_exists($expiration, $config['image_expiration_options']) && $expiration !== 'custom') {
+        $expiration = $config['image_expiration_default'];
+    }
+}
+
 // 黑/白IP名单上传
 if ($config['check_ip']) {
     if (checkIP(null, $config['check_ip_list'], $config['check_ip_model'])) {
@@ -251,7 +276,7 @@ if ($handle->uploaded) {
     // 同IP上传日志
     @write_ip_upload_count_logs();
     // 日志
-    @write_upload_logs($pathIMG, $handle->file_src_name, $handle->file_dst_pathname, $handle->file_src_size);
+    @write_upload_logs($pathIMG, $handle->file_src_name, $handle->file_dst_pathname, $handle->file_src_size, "web", $expiration, $custom_expire_time);
     // 鉴黄
     @process_checkImg($processUrl);
     // 水印

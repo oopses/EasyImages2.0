@@ -1590,7 +1590,7 @@ function process_checkImg($imgurl)
  * $fileSize 图片的大小
  * $form 来源如果是网页上传直接显示网页,如果是API上传则显示ID
  */
-function write_upload_logs($filePath, $sourceName, $absolutePath, $fileSize, $from = "web")
+function write_upload_logs($filePath, $sourceName, $absolutePath, $fileSize, $from = "web", $expiration = null, $custom_expire_time = null)
 {
     global $config;
 
@@ -1599,6 +1599,31 @@ function write_upload_logs($filePath, $sourceName, $absolutePath, $fileSize, $fr
     }
 
     $checkImg = $config['checkImg'] == true ? "ON" : "OFF";
+
+    // 计算过期时间
+    $expire_time = null;
+    $custom_expire_time = null;
+    if ($config['image_expiration_enable'] && $expiration) {
+        $current_time = time();
+        switch ($expiration) {
+            case '1day':
+                $expire_time = $current_time + 86400; // 1天
+                break;
+            case '1week':
+                $expire_time = $current_time + 604800; // 1周
+                break;
+            case '1month':
+                $expire_time = $current_time + 2592000; // 1个月（30天）
+                break;
+            case 'custom':
+                $expire_time = $custom_expire_time; // 使用传入的自定义时间戳
+                break;
+            case 'never':
+            default:
+                $expire_time = null; // 永久
+                break;
+        }
+    }
 
     // $name = trim(basename($filePath), " \t\n\r\0\x0B"); // 当前图片名称
     $log = array(basename($filePath) => array(             // 以上传图片名称为Array
@@ -1612,6 +1637,8 @@ function write_upload_logs($filePath, $sourceName, $absolutePath, $fileSize, $fr
         'md5'        => md5_file($absolutePath),           // 文件的md5
         'checkImg'   => $checkImg,                         // 鉴黄状态
         'from'       => $from,                             // 图片上传来源
+        'expiration' => $expiration,                       // 过期时间选项
+        'expire_time'=> $expire_time,                      // 过期时间戳
     ));
 
     // 创建日志文件夹

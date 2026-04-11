@@ -155,6 +155,12 @@ try {
                     width: 0.05
                 },
                 {
+                    label: '过期时间',
+                    name: 'expiration',
+                    html: true,
+                    width: 0.08
+                },
+                {
                     label: '管理',
                     name: 'manage',
                     html: true,
@@ -174,6 +180,24 @@ try {
                         size: '<?php echo $v['size']; ?>',
                         checkImg: '<?php echo strstr('OFF', $v['checkImg']) ? '否' : '是'; ?>',
                         from: '<?php echo is_string($v['from']) ? "网页" : 'API: ' . $v['from']; ?>',
+                        expiration: '<?php
+                            if (isset($v['expiration']) && isset($v['expire_time'])) {
+                                if ($v['expiration'] == 'never') {
+                                    echo '永久';
+                                } elseif ($v['expire_time']) {
+                                    $remaining = $v['expire_time'] - time();
+                                    if ($remaining > 0) {
+                                        echo date('Y-m-d H:i:s', $v['expire_time']) . '<br><small class="text-success">剩余 ' . ceil($remaining / 86400) . ' 天</small>';
+                                    } else {
+                                        echo '<span class="text-danger">已过期</span>';
+                                    }
+                                } else {
+                                    echo $v['expiration'];
+                                }
+                            } else {
+                                echo '永久';
+                            }
+                        ?>',
                         manage: '<div class="btn-group"><a href="<?php echo rand_imgurl() . $v['path']; ?>" target="_blank" class="btn btn-mini btn-success">查看</a> <a href="/app/info.php?img=<?php echo $v['path']; ?>" target="_blank" class="btn btn-mini">信息</a><a href="#" onclick="ajax_post(\'<?php echo $v['path']; ?>\',\'recycle\')" class="btn btn-mini btn-info">回收</a> <a href="#" onclick="ajax_post(\'<?php echo $v['path']; ?>\',\'delete\')" class="btn btn-mini btn-danger">删除</a></div>',
                     },					
                 <?php endforeach; ?>

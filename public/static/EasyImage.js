@@ -69,6 +69,15 @@ function uploadCopy(copyID, loadClass) {
         var formData = new FormData();
         formData.append('file', file);
         formData.append('sign', new Date().getTime() / 1000 | 0);
+        if (typeof imageExpirationEnabled !== 'undefined' && imageExpirationEnabled) {
+            var expirationSelect = document.getElementById('expiration-select');
+            var expirationCustom = document.getElementById('expiration-custom');
+            if (expirationSelect && expirationSelect.value === 'custom' && expirationCustom && expirationCustom.value) {
+                formData.append('expiration', 'custom:' + expirationCustom.value);
+            } else if (expirationSelect) {
+                formData.append('expiration', expirationSelect.value);
+            }
+        }
         var xhr = new XMLHttpRequest();
         xhr.onreadystatechange = function () {
             if (xhr.readyState === 1) {

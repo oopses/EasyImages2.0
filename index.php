@@ -22,6 +22,22 @@ mustLogin();
       <button type="button" class="close">x</button>
     </div>
     <div class="uploader-files file-list file-list-lg file-rename-by-click" data-drag-placeholder="选择文件/Ctrl+V粘贴/拖拽至此处" style="min-height: 188px; border-style: dashed;"></div>
+    <?php if ($config['image_expiration_enable']) : ?>
+    <div class="uploader-expiration" style="margin: 10px 0; text-align: center;">
+      <label style="margin-right: 10px;">图片过期时间:</label>
+      <div style="display: inline-block;">
+        <select id="expiration-select" class="form-control" style="display: inline-block; width: 180px !important; min-width: 180px !important; max-width: 280px; margin-right: 10px;">
+          <?php if (!empty($config['image_expiration_options']) && is_array($config['image_expiration_options'])) : ?>
+            <?php foreach ($config['image_expiration_options'] as $key => $label) : ?>
+            <option value="<?php echo $key; ?>" <?php if ($key === $config['image_expiration_default']) echo 'selected'; ?>><?php echo $label; ?></option>
+            <?php endforeach; ?>
+          <?php else : ?>
+            <option value="" disabled selected>配置未加载</option>
+          <?php endif; ?>
+        </select>
+        <input type="datetime-local" id="expiration-custom" class="form-control" style="display: none; width: 220px !important; min-width: 220px !important; max-width: 320px;" min="<?php echo date('Y-m-d\TH:i'); ?>" placeholder="请选择自定义过期时间">      </div>
+    </div>
+    <?php endif; ?>
     <div class="uploader-actions">
       <button type="button" class="btn btn-link uploader-btn-browse"><i class="icon icon-plus"></i> 选择文件</button>
       <button type="button" class="btn btn-link uploader-btn-start"><i class="icon icon-cloud-upload"></i> 开始上传</button>
@@ -92,25 +108,56 @@ mustLogin();
 <script type="application/javascript" src="<?php static_cdn(); ?>/public/static/marquee/marquee.min.js"></script>
 <script type="application/javascript" src="<?php static_cdn(); ?>/public/static/EasyImage.js"></script>
 <script>
+  // 全局配置变量
+  var imageExpirationEnabled = <?php echo $config['image_expiration_enable'] ? 'true' : 'false'; ?>;
+</script>
+<script>
   // 公告
   (function() {
-    new Marquee({
-      // 要滚动的元素
-      elem: document.getElementById("marquee2"),
-      // 每次滚动的步长(px)，默认0
-      step: 30,
-      // 滚动效果执行时间(ms)，默认400
-      stepInterval: 400,
-      // 每次滚动间隔时间(ms)，默认3000
-      interval: 3000,
-      // 滚动方向，up、down、left、right，默认为"left" 当前只支持上下
-      dir: 'up',
-      // 是否自动滚动，默认为true
-      autoPlay: true,
-      // 是否在鼠标滑过低级元素时暂停滚动，默认为true
-      hoverPause: true
-    });
+    var marqueeElem = document.getElementById("marquee2");
+    if (marqueeElem) {
+      new Marquee({
+        // 要滚动的元素
+        elem: marqueeElem,
+        // 每次滚动的步长(px)，默认0
+        step: 30,
+        // 滚动效果执行时间(ms)，默认400
+        stepInterval: 400,
+        // 每次滚动间隔时间(ms)，默认3000
+        interval: 3000,
+        // 滚动方向，up、down、left、right，默认为"left" 当前只支持上下
+        dir: 'up',
+        // 是否自动滚动，默认为true
+        autoPlay: true,
+        // 是否在鼠标滑过低级元素时暂停滚动，默认为true
+        hoverPause: true
+      });
+    }
   })();
+
+  // 过期时间选择器处理
+  <?php if ($config['image_expiration_enable']) : ?>
+  function updateExpirationCustomInput() {
+    if ($('#expiration-select').val() === 'custom') {
+      $('#expiration-custom').show();
+      var now = new Date();
+      var minTime = now.getFullYear() + '-' +
+        String(now.getMonth() + 1).padStart(2, '0') + '-' +
+        String(now.getDate()).padStart(2, '0') + 'T' +
+        String(now.getHours()).padStart(2, '0') + ':' +
+        String(now.getMinutes()).padStart(2, '0');
+      $('#expiration-custom').attr('min', minTime);
+      if (!$('#expiration-custom').val()) {
+        $('#expiration-custom').val(minTime);
+      }
+    } else {
+      $('#expiration-custom').hide();
+    }
+  }
+
+  $('#expiration-select').change(updateExpirationCustomInput);
+  updateExpirationCustomInput();
+  <?php endif; ?>
 
   // 上传控制
   $('#upShowID').uploader({
@@ -129,8 +176,24 @@ mustLogin();
     // silverlight 上传组件地址
     flash_swf_url: '<?php static_cdn(); ?>/public/static/zui/lib/uploader/Moxie.xap',
     // sign
-    multipart_params: {
-      'sign': new Date().getTime() / 1000 | 0,
+    multipart_params: function() {
+      var params = {
+        'sign': new Date().getTime() / 1000 | 0
+      };
+      <?php if ($config['image_expiration_enable']) : ?>
+      var expiration = $('#expiration-select').val();
+      if (expiration === 'custom') {
+        var customTime = $('#expiration-custom').val();
+        if (customTime) {
+          params['expiration'] = 'custom:' + customTime;
+        } else {
+          params['expiration'] = '<?php echo $config['image_expiration_default']; ?>';
+        }
+      } else {
+        params['expiration'] = expiration;
+      }
+      <?php endif; ?>
+      return params;
     },
     // 预览图尺寸
     previewImageSize: {

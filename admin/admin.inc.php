@@ -405,6 +405,36 @@ auto_delete(); //定时删除
                         <input type="range" class="form-control" name="minHeight" value="<?php echo $config['minHeight']; ?>" min="5" max="1024" step="10" onchange="document.getElementById('minHeight').innerHTML=value">
                     </div>
                     <div class="form-group col-md-6">
+                        <div class="switch switch-inline">
+                            <input type="hidden" name="image_expiration_enable" value="0">
+                            <input type="checkbox" name="image_expiration_enable" value="1" <?php if ($config['image_expiration_enable']) echo 'checked="checked"'; ?>>
+                            <label style="font-weight: bold">启用图片过期功能</label>
+                        </div>
+                    </div>
+                    <div class="form-group col-md-6">
+                        <label>默认过期时间</label>
+                        <select class="form-control" name="image_expiration_default" style="width: 180px !important; min-width: 180px !important; max-width: 280px;">
+                            <?php if (!empty($config['image_expiration_options']) && is_array($config['image_expiration_options'])) : ?>
+                                <?php foreach ($config['image_expiration_options'] as $key => $label) : ?>
+                                <option value="<?php echo $key; ?>" <?php if ($key === $config['image_expiration_default']) echo 'selected'; ?>><?php echo $label; ?></option>
+                                <?php endforeach; ?>
+                            <?php else : ?>
+                                <option value="" disabled selected>配置未加载</option>
+                            <?php endif; ?>
+                        </select>
+                    </div>
+                    <div class="form-group col-md-6">
+                        <div class="switch switch-inline">
+                            <input type="hidden" name="image_expiration_cleanup_enable" value="0">
+                            <input type="checkbox" name="image_expiration_cleanup_enable" value="1" <?php if ($config['image_expiration_cleanup_enable']) echo 'checked="checked"'; ?>>
+                            <label style="font-weight: bold">启用自动清理</label>
+                        </div>
+                    </div>
+                    <div class="form-group col-md-6">
+                        <label>每日清理时间（小时，24小时制）</label>
+                        <input type="number" class="form-control" name="image_expiration_cleanup_hour" value="<?php echo $config['image_expiration_cleanup_hour']; ?>" min="0" max="23" step="1">
+                    </div>
+                    <div class="form-group col-md-6">
                         <input type="hidden" class="form-control" name="update" value="<?php echo date("Y-m-d H:i:s"); ?>" placeholder="隐藏的保存">
                     </div>
                 </div>
