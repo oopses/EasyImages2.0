@@ -15,11 +15,65 @@ const FILENUM_KEY = 'filenum';
 const DIRNUM_KEY = 'dirnum';
 
 require_once '../app/chart.php';
+require_once '../app/function.php';
 
-// 检查是否开启查询
-if ($config['public'] === 0) {
+// 检查是否开启查询 (history 动作除外)
+if ($config['public'] === 0 && (!isset($_POST['action']) || $_POST['action'] !== 'history')) {
     http_response_code(403); // 返回403 Forbidden
     die('开放数据接口已关闭!');
+}
+
+// 处理 POST 请求 (用于 history 等需要 post 的接口)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    $action = $_POST['action'];
+
+    // history 端点 - 获取上传历史记录 (不需要 public 权限)
+    if ($action === 'history' && Database::isAvailable()) {
+        header('Content-Type: application/json');
+
+        $page = isset($_POST['page']) ? max(1, (int)$_POST['page']) : 1;
+        $pageSize = isset($_POST['pageSize']) ? min(100, max(1, (int)$_POST['pageSize'])) : 20;
+        $search = isset($_POST['search']) ? trim($_POST['search']) : '';
+
+        $filters = [];
+        if (!empty($search)) {
+            $filters['search'] = $search;
+        }
+
+        $result = db_get_records($page, $pageSize, 'id DESC', $filters);
+
+        echo json_encode([
+            'code' => 200,
+            'msg' => 'success',
+            'data' => $result['data'],
+            'total' => $result['total'],
+            'page' => $result['page'],
+            'pageSize' => $result['pageSize'],
+            'totalPages' => $result['totalPages']
+        ]);
+        exit;
+    }
+
+    // stats 端点 - 获取统计数据
+    if ($action === 'stats' && Database::isAvailable()) {
+        header('Content-Type: application/json');
+
+        $stats = db_get_stats();
+        $sourceStats = db_get_source_stats();
+
+        echo json_encode([
+            'code' => 200,
+            'msg' => 'success',
+            'data' => [
+                'stats' => $stats,
+                'source' => $sourceStats
+            ]
+        ]);
+        exit;
+    }
+
+    http_response_code(400);
+    die('未知action或数据库未启用');
 }
 
 // 获取并验证GET参数
@@ -39,7 +93,13 @@ try {
 
         // 今日上传
         case 'today':
-            echo read_total_json(TODAY_UPLOAD_KEY);
+            // 优先使用数据库
+            if (Database::isAvailable()) {
+                $stats = db_get_stats();
+                echo $stats['today_count'];
+            } else {
+                echo read_total_json(TODAY_UPLOAD_KEY);
+            }
             break;
 
         // 昨日上传
@@ -79,20 +139,32 @@ try {
 
         // 图床使用空间
         case 'image_used':
-            echo read_total_json(USAGE_SPACE_KEY);
+            // 优先使用数据库
+            if (Database::isAvailable()) {
+                $stats = db_get_stats();
+                echo getDistUsed($stats['total_size']);
+            } else {
+                echo read_total_json(USAGE_SPACE_KEY);
+            }
             break;
 
         // 文件数量
         case 'file':
-            echo read_total_json(FILENUM_KEY);
+            // 优先使用数据库
+            if (Database::isAvailable()) {
+                $stats = db_get_stats();
+                echo $stats['total_count'];
+            } else {
+                echo read_total_json(FILENUM_KEY);
+            }
             break;
 
         // 文件夹数量
         case 'dir':
             echo read_total_json(DIRNUM_KEY);
             break;
-        
-        // 修复"month"分支的逻辑
+
+        // 修复”month”分支的逻辑
         case 'month':
             $chartTotal = read_chart_total();
             if (isset($chartTotal['number']) && is_array($chartTotal['number'])) {
@@ -100,7 +172,7 @@ try {
                     echo $value;
                 }
             } else {
-                throw new Exception('无法获取图表总数中的“number”数据');
+                throw new Exception('无法获取图表总数中的”number”数据');
             }
             break;
 
@@ -110,5 +182,5 @@ try {
     }
 } catch (Exception $e) {
     http_response_code(500); // 返回500 Internal Server Error
-    die("发生错误: " . $e->getMessage());
+    die(“发生错误: “ . $e->getMessage());
 }

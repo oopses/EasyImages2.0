@@ -6,6 +6,17 @@ require_once __DIR__ . '/header.php';
 /** 顶部广告 */
 if ($config['ad_top']) echo $config['ad_top_info'];
 ?>
+<script>
+// 如果没有指定日期，获取用户本地日期并跳转
+if (!window.location.search.includes('date=')) {
+    var now = new Date();
+    var year = now.getFullYear();
+    var month = String(now.getMonth() + 1).padStart(2, '0');
+    var day = String(now.getDate()).padStart(2, '0');
+    var localDateStr = year + '/' + month + '/' + day + '/';
+    window.location.href = window.location.pathname + '?date=' + localDateStr;
+}
+</script>
 <div class="row">
   <div class="col-md-12">
     <?php
@@ -23,24 +34,49 @@ if ($config['ad_top']) echo $config['ad_top_info'];
           echo '
           <script>
             new $.zui.Messager("已超出浏览页数, 返回今日上传列表", {
-            type: "info", // 定义颜色主题 
+            type: "info", // 定义颜色主题
             icon: "exclamation-sign" // 定义消息图标
             }).show();
           </script>';
         } else {
           $path = $_GET['date'];                                                                        // 如果不小于则返回当前GET日期
         }
+      } else {
+        // 没有指定日期且使用数据库模式时，默认显示最近有上传的日期
+        if (Database::isAvailable()) {
+          $latestDate = db_get_latest_upload_date();
+          if ($latestDate) {
+            $path = $latestDate;
+          }
+        }
       }
 
       $path = preg_replace("/^d{4}-d{2}-d{2} d{2}:d{2}:d{2}$/s", "", trim($path));                      // 过滤非日期，删除空格
       $keyNum = isset($_GET['num']) ? $_GET['num'] : $config['listNumber'];                             // 获取指定浏览数量
       $keyNum = preg_replace("/[\W]/", "", trim($keyNum));                                              // 过滤非数字，删除空格
-      // $fileArr = getFile(APP_ROOT . config_path($path));                                             // 获取当日上传列表
       $fileType = isset($_GET['search']) ? '*.' . preg_replace("/[\W]/", "", $_GET['search'])  : '*.*'; // 按照图片格式
-      $fileArr = get_file_by_glob(APP_ROOT . config_path($path) .  $fileType, 'list');                  // 获取当日上传列表
+
+      // 判断使用数据库还是文件系统
+      $useDatabase = Database::isAvailable();
+      db_log("list.php: useDatabase=" . ($useDatabase ? 'true' : 'false') . ", path=" . $path);
+      $fileArr = [];
+      $todayCount = 0;
       $allUploud = isset($_GET['date']) ? $_GET['date'] : date('Y/m/d/');
-      $allUploud = get_file_by_glob(APP_ROOT . $config['path'] . $allUploud, 'number');                 // 当前日期全部上传
-      $httpUrl = array('date' => $path, 'num' => getFileNumber(APP_ROOT . config_path($path)));         // 组合url
+
+      if ($useDatabase) {
+        // 数据库模式
+        $todayCount = db_get_list_count_by_date($path);
+        db_log("list.php: db mode, todayCount=" . $todayCount);
+        $fileArr = db_get_list_by_date($path, (int)$keyNum, 0, $fileType);
+        db_log("list.php: fileArr count=" . count($fileArr));
+      } else {
+        // 文件系统模式 (原始逻辑)
+        db_log("list.php: file mode");
+        $fileArr = get_file_by_glob(APP_ROOT . config_path($path) .  $fileType, 'list');
+        $allUploud = get_file_by_glob(APP_ROOT . $config['path'] . $allUploud, 'number');
+      }
+
+      $httpUrl = array('date' => $path, 'num' => $todayCount ?: getFileNumber(APP_ROOT . config_path($path)));
 
       // 隐藏path目录获取图片复制与原图地址
       if ($config['hide_path']) {
@@ -49,16 +85,18 @@ if ($config['ad_top']) echo $config['ad_top_info'];
         $config_path = config_path($path);
       }
 
-      if (empty($fileArr[0])) : ?>
+      if (empty($fileArr[0]) && empty($fileArr)) : ?>
         <div class="alert alert-danger">今天还没有上传的图片哟~~ <br />快来上传第一张吧~!</div>
       <?php else : ?>
         <ul id="viewjs">
           <div class="cards listNum">
-            <?php foreach ($fileArr as $key => $value) {
-              if ($key < $keyNum) {
-                $relative_path = config_path($path) . $value;     // 相对路径
-                $imgUrl = $config['domain'] . $relative_path;     // 图片地址
-                $linkUrl = rand_imgurl() . $config_path . $value; // 图片复制与原图地址
+            <?php
+            if ($useDatabase) {
+              // 数据库模式渲染
+              foreach ($fileArr as $record) {
+                $relative_path = $record['path'];
+                $imgUrl = $config['domain'] . $relative_path;
+                $linkUrl = rand_imgurl() . $config_path . $record['filename'];
             ?>
                 <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12">
                   <div class="card">
@@ -83,6 +121,38 @@ if ($config['ad_top']) echo $config['ad_top_info'];
                 </div>
             <?php
               }
+            } else {
+              // 文件系统模式渲染 (原始逻辑)
+              foreach ($fileArr as $key => $value) {
+                if ($key < $keyNum) {
+                  $relative_path = config_path($path) . $value;     // 相对路径
+                  $imgUrl = $config['domain'] . $relative_path;     // 图片地址
+                  $linkUrl = rand_imgurl() . $config_path . $value; // 图片复制与原图地址
+            ?>
+                <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12">
+                  <div class="card">
+                    <li><img src="<?php static_cdn(); ?>/public/images/loading.svg" data-image="<?php echo creat_thumbnail_by_list($imgUrl); ?>" data-original="<?php echo $imgUrl; ?>" alt="简单图床-EasyImage"></li>
+                    <div class="bottom-bar">
+                      <a href="<?php echo $linkUrl; ?>" target="_blank"><i class="icon icon-picture" data-toggle="tooltip" title="打开" style="margin-left:10px;"></i></a>
+                      <a href="#" class="copy" data-clipboard-text="<?php echo $linkUrl; ?>" data-toggle="tooltip" title="复制链接" style="margin-left:10px;"><i class="icon icon-copy"></i></a>
+                      <?php if ($config['show_exif_info'] || is_who_login('admin')) : ?>
+                        <a href="/app/info.php?img=<?php echo $relative_path; ?>" data-toggle="tooltip" title="详细信息" target="_blank" style="margin-left:10px;"><i class="icon icon-info-sign"></i></a>
+                      <?php endif; ?>
+                      <a href="/app/down.php?dw=<?php echo $relative_path; ?>" data-toggle="tooltip" title="下载文件" target="_blank" style="margin-left:10px;"><i class="icon icon-cloud-download"></i></a>
+                      <?php if (!empty($config['report'])) : ?>
+                        <a href="<?php echo $config['report'] . '?Website1=' . $linkUrl; ?>" target="_blank"><i class="icon icon-question-sign" data-toggle="tooltip" title="举报文件" style="margin-left:10px;"></i></a>
+                      <?php endif; ?>
+                      <?php if (is_who_login('admin')) : ?>
+                        <a href="#" onclick="ajax_post('<?php echo $relative_path; ?>','recycle')" data-toggle="tooltip" title="回收文件" style="margin-left:10px;"><i class="icon icon-undo"></i></a>
+                        <a href="#" onclick="ajax_post('<?php echo $relative_path; ?>')" data-toggle="tooltip" title="删除文件" style="margin-left:10px;"><i class="icon icon-trash"></i></a>
+                        <label class="text-primary"><input type="checkbox" id="url" name="checkbox" value="<?php echo $relative_path; ?>"> 选择</label>
+                      <?php endif; ?>
+                    </div>
+                  </div>
+                </div>
+            <?php
+                }
+              }
             }
             ?>
           </div>
@@ -99,12 +169,15 @@ if ($config['ad_top']) echo $config['ad_top_info'];
       <div class="btn-toolbar">
         <div class="btn-group">
           <a class="btn btn-danger btn-mini" href="?<?php echo http_build_query($httpUrl); ?>">当前<?php echo $allUploud; ?></a>
-          <a class="btn btn-primary btn-mini" href="list.php">今日<?php echo get_file_by_glob(APP_ROOT . config_path() . '*.*', 'number'); ?></a>
-          <a class="btn btn-mini" href="?date=<?php echo date("Y/m/d/", strtotime("-1 day")) ?>">昨日<?php echo get_file_by_glob(APP_ROOT . $config['path'] . date("Y/m/d/", strtotime("-1 day")), 'number'); ?></a>
+          <a class="btn btn-primary btn-mini" href="list.php">今日<?php echo $useDatabase ? db_get_list_count_by_date(date('Y/m/d/')) : get_file_by_glob(APP_ROOT . config_path() . '*.*', 'number'); ?></a>
+          <a class="btn btn-mini" href="?date=<?php echo date("Y/m/d/", strtotime("-1 day")) ?>">昨日<?php echo $useDatabase ? db_get_list_count_by_date(date('Y/m/d/', strtotime("-1 day"))) : get_file_by_glob(APP_ROOT . $config['path'] . date("Y/m/d/", strtotime("-1 day")), 'number'); ?></a>
           <?php
           // 倒推日期显示上传图片 @param $listDate 配置的倒退日期
-          for ($x = 2; $x <= $listDate; $x++)
-            echo '<a class="btn btn-mini hidden-xs inline-block" href="?date=' . date('Y/m/d/', strtotime("-$x day"))  .  '">' . date('j号', strtotime("-$x day")) . '</a>';
+          for ($x = 2; $x <= $listDate; $x++) {
+            $datePath = date('Y/m/d/', strtotime("-$x day"));
+            $count = $useDatabase ? db_get_list_count_by_date($datePath) : get_file_by_glob(APP_ROOT . $config['path'] . $datePath . '*.*', 'number');
+            echo '<a class="btn btn-mini hidden-xs inline-block" href="?date=' . $datePath . '">' . date('j号', strtotime("-$x day")) . '</a>';
+          }
           ?>
         </div>
         <?php if (is_who_login('admin')) : ?>
@@ -168,10 +241,13 @@ if ($config['ad_top']) echo $config['ad_top_info'];
   <script type="application/javascript" src="<?php static_cdn(); ?>/public/static/zui/lib/clipboard/clipboard.min.js"></script>
   <script type="application/javascript" src="<?php static_cdn(); ?>/public/static/zui/lib/datetimepicker/datetimepicker.min.js"></script>
   <script>
-    // viewjs
-    new Viewer(document.getElementById('viewjs'), {
-      url: 'data-original',
-    });
+    // viewjs - 只在有图片时初始化 viewer
+    var viewjsEl = document.getElementById('viewjs');
+    if (viewjsEl && viewjsEl.querySelector('li')) {
+      new Viewer(viewjsEl, {
+        url: 'data-original',
+      });
+    }
 
     // POST 删除提交
     function ajax_post(url, mode = 'delete') {
@@ -355,9 +431,6 @@ if ($config['ad_top']) echo $config['ad_top_info'];
 
     //懒加载
     var lazy = new Lazy({
-      onload: function(elem) {
-        console.log(elem)
-      },
       delay: 300,
     })
 

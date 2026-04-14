@@ -3,6 +3,9 @@ require_once __DIR__ . '/base.php';
 require_once __DIR__ . '/WaterMask.php';
 require_once APP_ROOT . '/config/config.guest.php';
 
+// 数据库类 - 使用 include 而非 require_once，以便在数据库未启用时优雅降级
+@include_once __DIR__ . '/class.database.php';
+
 /**
  * 判断GIF图片是否为动态
  * @param $filename string 文件
@@ -1668,6 +1671,642 @@ function write_upload_logs($filePath, $sourceName, $absolutePath, $fileSize, $fr
 
     $log = array_replace($logs, $log);
     cache_write($logFileName, $log, 'logs');
+
+    // 数据库写入
+    error_log('DEBUG: write_upload_logs called, absolutePath=' . $absolutePath . ', fileSize=' . $fileSize);
+    db_write_upload_record($filePath, $sourceName, $absolutePath, $fileSize, $from, $expiration, $expire_time);
+}
+
+/**
+ * 写入图片上传记录到数据库
+ * @param string $filePath 文件相对路径
+ * @param string $sourceName 原始文件名
+ * @param string $absolutePath 文件绝对路径
+ * @param int $fileSize 文件大小
+ * @param string $from 来源(web/api/guest)
+ * @param string|null $expiration 过期选项
+ * @param int|null $expire_time 过期时间戳
+ * @return int|null 插入ID或null
+ */
+function db_write_upload_record($filePath, $sourceName, $absolutePath, $fileSize, $from = "web", $expiration = null, $expire_time = null)
+{
+    global $config;
+
+    // 检查数据库是否启用
+    if (empty($config['db']['enable'])) {
+        return null;
+    }
+
+    try {
+        $db = Database::getInstance();
+
+        // 检查表是否存在，不存在则自动创建
+        $prefix = $config['db']['table_prefix'] ?? 'easyimages_';
+        $tableName = $prefix . 'records';
+        try {
+            // SHOW TABLES LIKE 不支持预处理参数，改用字符串拼接
+            $exists = $db->getOne("SHOW TABLES LIKE '{$tableName}'");
+            if (!$exists) {
+                Database::initDatabase();
+            }
+        } catch (Throwable $e) {
+            // 表不存在，初始化
+            db_log('ERROR in table check: ' . $e->getMessage());
+            Database::initDatabase();
+        }
+
+        $filename = basename($filePath);
+
+        // 检查文件是否存在
+        if (!file_exists($absolutePath)) {
+            db_log('ERROR: file not exists: ' . $absolutePath);
+            return null;
+        }
+
+        $md5 = md5_file($absolutePath);
+
+        // 获取图片信息
+        $imageInfo = @getimagesize($absolutePath);
+        $width = $imageInfo[0] ?? 0;
+        $height = $imageInfo[1] ?? 0;
+        $mimeType = $imageInfo['mime'] ?? null;
+
+        // 获取图片URL
+        $url = rtrim($config['imgurl'], '/') . $filePath;
+        $thumbUrl = null;
+        $delUrl = null;
+
+        // 如果有缩略图，生成缩略图URL
+        if ($config['thumbnail'] && $config['path']) {
+            $thumbPath = '/cache/' . pathinfo($filePath, PATHINFO_FILENAME) . '_thumb.' . pathinfo($filePath, PATHINFO_EXTENSION);
+            if (is_file(APP_ROOT . $config['path'] . $thumbPath)) {
+                $thumbUrl = rtrim($config['imgurl'], '/') . $thumbPath;
+            }
+        }
+
+        // 生成删除URL
+        if (!empty($config['admin_path'])) {
+            $delUrl = '/' . $config['admin_path'] . '/del.php?hash=' . substr(md5($filename . $config['password']), 0, 16) . '&name=' . urlencode($filename);
+        }
+
+        // 格式化过期时间
+        $expireTimeFormatted = null;
+        if ($expire_time) {
+            $expireTimeFormatted = date('Y-m-d H:i:s', $expire_time);
+        }
+
+        $data = [
+            'filename' => $filename,
+            'original_name' => $sourceName,
+            'path' => $filePath,
+            'url' => $url,
+            'thumb_url' => $thumbUrl,
+            'del_url' => $delUrl,
+            'file_size' => $fileSize,
+            'size_formatted' => getDistUsed($fileSize),
+            'md5' => $md5,
+            'width' => $width,
+            'height' => $height,
+            'mime_type' => $mimeType,
+            'ip' => real_ip(),
+            'port' => $_SERVER['REMOTE_PORT'] ?? null,
+            'user_agent' => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500),
+            'upload_source' => $from,
+            'check_status' => ($config['checkImg'] ?? false) ? 1 : 0,
+            'expiration' => $expiration ?? 'never',
+            'expire_time' => $expire_time,
+            'expire_time_formatted' => $expireTimeFormatted,
+            'created_at' => date('Y-m-d H:i:s'),
+        ];
+
+        $id = $db->insert('records', $data);
+
+        // 更新统计
+        db_update_stats($fileSize);
+
+        return $id;
+    } catch (Exception $e) {
+        db_log('ERROR: db_write_upload_record failed: ' . $e->getMessage());
+        return null;
+    }
+}
+
+/**
+ * 写入数据库操作日志到文件
+ * @param string $message 日志信息
+ */
+function db_log($message)
+{
+    $logDir = APP_ROOT . '/admin/logs/db/';
+    if (!is_dir($logDir)) {
+        mkdir($logDir, 0755, true);
+    }
+
+    $logFile = $logDir . date('Y-m') . '.log';
+    $timestamp = date('Y-m-d H:i:s');
+    $ip = real_ip();
+
+    file_put_contents($logFile, "[{$timestamp}] [{$ip}] {$message}\n", FILE_APPEND | LOCK_EX);
+}
+
+/**
+ * 更新统计信息
+ * @param int $fileSize 文件大小
+ */
+function db_update_stats($fileSize = 0)
+{
+    global $config;
+
+    if (empty($config['db']['enable'])) {
+        return;
+    }
+
+    try {
+        $db = Database::getInstance();
+        $prefix = $config['db']['table_prefix'] ?? 'easyimages_';
+        $today = date('Y-m-d');
+        $statsTable = $prefix . 'stats';
+
+        // 查找今天的统计记录
+        $stat = $db->getRow("SELECT * FROM {$statsTable} WHERE stat_date = '{$today}'");
+
+        if ($stat) {
+            // 更新现有记录
+            $db->update('stats', [
+                'upload_count' => $stat['upload_count'] + 1,
+                'total_size' => $stat['total_size'] + $fileSize,
+                'total_count' => $stat['total_count'] + 1,
+            ], 'stat_date = :date', ['date' => $today]);
+        } else {
+            // 创建新记录
+            $db->insert('stats', [
+                'stat_date' => $today,
+                'upload_count' => 1,
+                'total_size' => $fileSize,
+                'total_count' => db_get_total_count(),
+            ]);
+        }
+    } catch (Exception $e) {
+        db_log('ERROR: db_update_stats failed: ' . $e->getMessage());
+    }
+}
+
+/**
+ * 获取总图片数
+ * @return int
+ */
+function db_get_total_count()
+{
+    global $config;
+
+    if (empty($config['db']['enable'])) {
+        return 0;
+    }
+
+    try {
+        $db = Database::getInstance();
+        $prefix = $config['db']['table_prefix'] ?? 'easyimages_';
+        return (int) $db->getOne("SELECT COUNT(*) FROM {$prefix}records WHERE is_deleted = 0");
+    } catch (Exception $e) {
+        return 0;
+    }
+}
+
+/**
+ * 获取图片记录列表(支持分页)
+ * @param int $page 页码
+ * @param int $pageSize 每页数量
+ * @param string $order 排序
+ * @param array $filters 筛选条件
+ * @return array
+ */
+function db_get_records($page = 1, $pageSize = 20, $order = 'id DESC', $filters = [])
+{
+    global $config;
+
+    if (empty($config['db']['enable'])) {
+        return ['data' => [], 'total' => 0, 'page' => $page, 'pageSize' => $pageSize];
+    }
+
+    try {
+        $db = Database::getInstance();
+
+        $where = 'is_deleted = 0';
+        $params = [];
+
+        // 日期筛选 - 使用 path 字段代替 created_at，解决时区问题
+        if (!empty($filters['date'])) {
+            // path 格式: /i/2026/04/14/filename.jpg ($config['path'] = /i/)
+            $pathPattern = $config['path'] . str_replace('-', '/', $filters['date']) . '/%';
+            $where .= ' AND path LIKE :date';
+            $params['date'] = $pathPattern;
+        }
+
+        // IP筛选
+        if (!empty($filters['ip'])) {
+            $where .= ' AND ip LIKE :ip';
+            $params['ip'] = '%' . $filters['ip'] . '%';
+        }
+
+        // 来源筛选
+        if (!empty($filters['source'])) {
+            $where .= ' AND upload_source = :source';
+            $params['source'] = $filters['source'];
+        }
+
+        // 搜索文件名
+        if (!empty($filters['search'])) {
+            $where .= ' AND (original_name LIKE :search OR filename LIKE :search)';
+            $params['search'] = '%' . $filters['search'] . '%';
+        }
+
+        return $db->paginate('records', $page, $pageSize, $where, $order, $params);
+    } catch (Exception $e) {
+        error_log('db_get_records failed: ' . $e->getMessage());
+        return ['data' => [], 'total' => 0, 'page' => $page, 'pageSize' => $pageSize];
+    }
+}
+
+/**
+ * 获取统计数据
+ * @return array
+ */
+function db_get_stats()
+{
+    global $config;
+
+    $default = [
+        'today_count' => 0,
+        'today_size' => 0,
+        'total_count' => 0,
+        'total_size' => 0,
+    ];
+
+    if (empty($config['db']['enable'])) {
+        return $default;
+    }
+
+    try {
+        $db = Database::getInstance();
+        $prefix = $config['db']['table_prefix'] ?? 'easyimages_';
+        $today = date('Y-m-d');
+        $statsTable = $prefix . 'stats';
+
+        // 今日统计
+        $todayStat = $db->getRow("SELECT upload_count, total_size FROM {$statsTable} WHERE stat_date = '{$today}'");
+
+        // 累计统计
+        $totalStat = $db->getRow("SELECT SUM(upload_count) as total_count, SUM(total_size) as total_size FROM {$statsTable}");
+
+        return [
+            'today_count' => $todayStat['upload_count'] ?? 0,
+            'today_size' => $todayStat['total_size'] ?? 0,
+            'total_count' => $totalStat['total_count'] ?? 0,
+            'total_size' => $totalStat['total_size'] ?? 0,
+        ];
+    } catch (Exception $e) {
+        error_log('db_get_stats failed: ' . $e->getMessage());
+        return $default;
+    }
+}
+
+/**
+ * 获取最近N条上传记录
+ * @param int $limit 数量
+ * @return array
+ */
+function db_get_recent_records($limit = 10)
+{
+    global $config;
+
+    if (empty($config['db']['enable'])) {
+        return [];
+    }
+
+    try {
+        $db = Database::getInstance();
+        $prefix = $config['db']['table_prefix'] ?? 'easyimages_';
+        return $db->getAll(
+            "SELECT * FROM {$prefix}records WHERE is_deleted = 0 ORDER BY id DESC LIMIT :limit",
+            ['limit' => $limit]
+        );
+    } catch (Exception $e) {
+        error_log('db_get_recent_records failed: ' . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * 删除图片记录(软删除)
+ * @param string $filename 文件名
+ * @return bool
+ */
+function db_delete_record($filename)
+{
+    global $config;
+
+    if (empty($config['db']['enable'])) {
+        return false;
+    }
+
+    try {
+        $db = Database::getInstance();
+        $db->update('records', [], 'filename = :filename', ['filename' => $filename]);
+        return true;
+    } catch (Exception $e) {
+        error_log('db_delete_record failed: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * 按日期获取图片列表(数据库)
+ * @param string $date 日期格式 Y/m/d/
+ * @param int $limit 限制数量
+ * @param int $offset 偏移量
+ * @param string $fileType 文件类型筛选
+ * @return array
+ */
+function db_get_list_by_date($date, $limit = 20, $offset = 0, $fileType = '')
+{
+    global $config;
+
+    if (empty($config['db']['enable'])) {
+        return [];
+    }
+
+    try {
+        $db = Database::getInstance();
+        $prefix = $db->getPrefix();
+
+        // 从 path 中提取日期进行查询，解决时区不一致问题
+        // path 格式: /i/2026/04/14/filename.jpg ($config['path'] = /i/)
+        $pathDate = trim($date, '/'); // 2026/04/14
+        $originalPathDate = $pathDate;
+        $pathPattern = $config['path'] . $pathDate . '/%'; // /i/2026/04/14/%
+
+        // 文件类型筛选
+        $typeCondition = '';
+        if (!empty($fileType) && $fileType !== '*' && $fileType !== '*.*') {
+            $type = ltrim($fileType, '.');
+            $typeCondition = " AND (path LIKE '%." . $type . "' OR path LIKE '%." . strtoupper($type) . "')";
+        }
+
+        // 直接拼接 pathPattern 到 SQL，避免参数绑定问题
+        $sql = "SELECT filename, path, url, thumb_url, original_name, file_size, size_formatted, md5,
+                       width, height, created_at
+                FROM {$prefix}records
+                WHERE is_deleted = 0 AND path LIKE '{$pathPattern}'{$typeCondition}
+                ORDER BY id DESC
+                LIMIT {$offset}, {$limit}";
+
+        db_log("db_get_list_by_date: pathPattern={$pathPattern}, prefix={$prefix}, sql={$sql}");
+
+        $records = $db->getAll($sql);
+
+        db_log("db_get_list_by_date: after getAll, count=" . count($records));
+
+        // 如果当前日期查询结果为0，且服务器日期与请求日期一致，
+        // 则自动查找最近有上传的日期
+        if (empty($records) && $originalPathDate === date('Y/m/d')) {
+            $sql = "SELECT SUBSTRING(MAX(path), 4, 10) as latest_date FROM {$prefix}records WHERE is_deleted = 0 AND path LIKE :pattern";
+            $latestDate = $db->getOne($sql, ['pattern' => $config['path'] . '%']);
+            if ($latestDate) {
+                $pathDate = $latestDate;
+                $pathPattern = $config['path'] . $pathDate . '/%';
+                db_log("db_get_list_by_date: auto corrected to latest date={$pathDate}");
+                // 重新构建 SQL 和类型筛选条件
+                $typeCondition = '';
+                if (!empty($fileType) && $fileType !== '*' && $fileType !== '*.*') {
+                    $type = ltrim($fileType, '.');
+                    $typeCondition = " AND (path LIKE '%." . $type . "' OR path LIKE '%." . strtoupper($type) . "')";
+                }
+                $sql = "SELECT filename, path, url, thumb_url, original_name, file_size, size_formatted, md5, width, height, created_at
+                         FROM {$prefix}records
+                         WHERE is_deleted = 0 AND path LIKE '{$pathPattern}'{$typeCondition}
+                         ORDER BY id DESC LIMIT {$offset}, {$limit}";
+                $records = $db->getAll($sql);
+            }
+        }
+
+        db_log("db_get_list_by_date: found " . count($records) . " records, first record: " . json_encode($records[0] ?? null));
+
+        // 处理 URL
+        foreach ($records as &$record) {
+            if (empty($record['url'])) {
+                $record['url'] = rtrim($config['imgurl'], '/') . $record['path'];
+            }
+        }
+        unset($record); // 解除引用
+
+        db_log("db_get_list_by_date: before return, count=" . count($records));
+
+        return $records;
+    } catch (Exception $e) {
+        error_log('db_get_list_by_date failed: ' . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * 获取指定日期的图片数量(数据库)
+ * @param string $date 日期格式 Y/m/d/
+ * @return int
+ */
+function db_get_list_count_by_date($date)
+{
+    global $config;
+
+    if (empty($config['db']['enable'])) {
+        return 0;
+    }
+
+    try {
+        $db = Database::getInstance();
+        $prefix = $db->getPrefix();
+
+        // 从 path 中提取日期进行查询，解决时区不一致问题
+        // path 格式: /i/2026/04/14/filename.jpg ($config['path'] = /i/)
+        $pathDate = trim($date, '/'); // 2026/04/14
+        $pathPattern = $config['path'] . $pathDate . '/%'; // /i/2026/04/14/%
+
+        $sql = "SELECT COUNT(*) FROM {$prefix}records
+                WHERE is_deleted = 0 AND path LIKE :pathPattern";
+
+        db_log("db_get_list_count_by_date: pathPattern={$pathPattern}, prefix={$prefix}");
+
+        $result = (int) $db->getOne($sql, ['pathPattern' => $pathPattern]);
+
+        // 如果当前日期查询结果为0，且服务器日期与请求日期一致，
+        // 则自动查找最近有上传的日期
+        if ($result == 0 && $pathDate === date('Y/m/d')) {
+            $sql = "SELECT SUBSTRING(MAX(path), 4, 10) as latest_date FROM {$prefix}records WHERE is_deleted = 0 AND path LIKE :pattern";
+            $latestDate = $db->getOne($sql, ['pattern' => $config['path'] . '%']);
+            if ($latestDate) {
+                $pathDate = $latestDate;
+                $pathPattern = $config['path'] . $pathDate . '/%';
+                db_log("db_get_list_count_by_date: auto corrected to latest date={$pathDate}");
+                $result = (int) $db->getOne("SELECT COUNT(*) FROM {$prefix}records WHERE is_deleted = 0 AND path LIKE :pathPattern", ['pathPattern' => $pathPattern]);
+            }
+        }
+
+        db_log("db_get_list_count_by_date: result={$result}");
+
+        return $result;
+    } catch (Exception $e) {
+        error_log('db_get_list_count_by_date failed: ' . $e->getMessage());
+        return 0;
+    }
+}
+
+/**
+ * 获取最近有上传的单个日期(数据库)
+ * @return string|null 返回格式 Y/m/d/ 或 null
+ */
+function db_get_latest_upload_date()
+{
+    global $config;
+
+    if (empty($config['db']['enable'])) {
+        return null;
+    }
+
+    try {
+        $db = Database::getInstance();
+        $prefix = $db->getPrefix();
+
+        // 从 path 提取最新日期，格式: /i/YYYY/MM/DD/filename.jpg
+        $sql = "SELECT SUBSTRING(MAX(path), 4, 10) as latest_date
+                FROM {$prefix}records
+                WHERE is_deleted = 0 AND path LIKE :pattern";
+
+        $latestDate = $db->getOne($sql, ['pattern' => $config['path'] . '%']);
+
+        return $latestDate ? $latestDate . '/' : null;
+    } catch (Exception $e) {
+        error_log('db_get_latest_upload_date failed: ' . $e->getMessage());
+        return null;
+    }
+}
+
+/**
+ * 获取最近有上传的日期列表(数据库)
+ * @param int $days 返回天数
+ * @return array
+ */
+function db_get_recent_upload_dates($days = 30)
+{
+    global $config;
+
+    if (empty($config['db']['enable'])) {
+        return [];
+    }
+
+    try {
+        $db = Database::getInstance();
+        $prefix = $db->getPrefix();
+
+        // 从 path 提取日期，格式: /i/YYYY/MM/DD/filename.jpg ($config['path'] = /i/)
+        $minDate = date('Y/m/d', strtotime("- $days days"));
+        $minPath = $config['path'] . $minDate . '/';
+
+        $sql = "SELECT SUBSTRING(path, 4, 10) as upload_date, COUNT(*) as count
+                FROM {$prefix}records
+                WHERE is_deleted = 0 AND path >= :minPath
+                GROUP BY SUBSTRING(path, 4, 10)
+                ORDER BY upload_date DESC";
+
+        return $db->getAll($sql, ['minPath' => $minPath]);
+    } catch (Exception $e) {
+        error_log('db_get_recent_upload_dates failed: ' . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * 获取上传来源统计(数据库)
+ * @return array
+ */
+function db_get_source_stats()
+{
+    global $config;
+
+    $default = ['web' => 0, 'api' => 0, 'guest' => 0];
+
+    if (empty($config['db']['enable'])) {
+        return $default;
+    }
+
+    try {
+        $db = Database::getInstance();
+        $prefix = $db->getPrefix();
+
+        $sql = "SELECT upload_source, COUNT(*) as count
+                FROM {$prefix}records
+                WHERE is_deleted = 0
+                GROUP BY upload_source";
+
+        $results = $db->getAll($sql);
+
+        $stats = $default;
+        foreach ($results as $row) {
+            $stats[$row['upload_source']] = (int) $row['count'];
+        }
+
+        return $stats;
+    } catch (Exception $e) {
+        error_log('db_get_source_stats failed: ' . $e->getMessage());
+        return $default;
+    }
+}
+
+/**
+ * 获取图表统计数据(数据库)
+ * @param int $days 天数
+ * @return array
+ */
+function db_get_chart_data($days = 30)
+{
+    global $config;
+
+    if (empty($config['db']['enable'])) {
+        return ['chart_data' => [], 'chart_disk' => []];
+    }
+
+    try {
+        $db = Database::getInstance();
+        $prefix = $db->getPrefix();
+
+        // 从 path 提取日期，格式: /i/YYYY/MM/DD/filename.jpg ($config['path'] = /i/)
+        $minDate = date('Y/m/d', strtotime("- $days days"));
+        $minPath = $config['path'] . $minDate . '/';
+
+        // 获取每日上传数量
+        $sql = "SELECT SUBSTRING(path, 4, 10) as upload_date, COUNT(*) as count
+                FROM {$prefix}records
+                WHERE is_deleted = 0 AND path >= :minPath
+                GROUP BY SUBSTRING(path, 4, 10)
+                ORDER BY upload_date ASC";
+
+        $results = $db->getAll($sql, ['minPath' => $minPath]);
+
+        $chartData = [];
+        $chartDisk = [];
+
+        foreach ($results as $row) {
+            $datePath = $row['upload_date'] . '/'; // 已经是 YYYY/MM/DD 格式
+            $chartData[] = [$datePath => (int)$row['count']];
+            $chartDisk[] = [$datePath => 0]; // 数据库不存储单文件大小，这里留空
+        }
+
+        return [
+            'chart_data' => $chartData,
+            'chart_disk' => $chartDisk
+        ];
+    } catch (Exception $e) {
+        error_log('db_get_chart_data failed: ' . $e->getMessage());
+        return ['chart_data' => [], 'chart_disk' => []];
+    }
 }
 
 /**
@@ -1681,9 +2320,9 @@ function ip2region($IP)
     try {
         require_once __DIR__ . '/ip2region/Ip2Region.php';
         $ip2region = new Ip2Region();
-        /* 显示完整信息 
-        $location = $ip2region->memorySearch($IP); 
-        $location = $location['region'];        
+        /* 显示完整信息
+        $location = $ip2region->memorySearch($IP);
+        $location = $location['region'];
         $location =  str_replace(array('0', '||'), '', $location);
         */
         return $ip2region->simple($IP); // 显示简易信息
@@ -1954,4 +2593,127 @@ function chunk($target_name)
         deldir($temp_dir); // 删除临时目录
     }
     return $target_name;
+}
+
+/**
+ * 从数据库获取已过期的图片记录
+ * @return array 已过期记录列表
+ */
+function db_get_expired_records()
+{
+    global $config;
+
+    if (empty($config['db']['enable'])) {
+        return [];
+    }
+
+    try {
+        $db = Database::getInstance();
+        $prefix = $db->getPrefix();
+        $currentTime = time();
+
+        // 查询已过期且未删除的记录
+        // 过期时间不为空且 expire_time < 当前时间
+        $sql = "SELECT id, filename, path, url, expire_time, expire_time_formatted
+                FROM {$prefix}records
+                WHERE is_deleted = 0
+                  AND expiration != 'never'
+                  AND expire_time IS NOT NULL
+                  AND expire_time > 0
+                  AND expire_time < :current_time";
+
+        return $db->getAll($sql, ['current_time' => $currentTime]);
+    } catch (Exception $e) {
+        error_log('db_get_expired_records failed: ' . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * 清理数据库中的过期图片记录(软删除)
+ * @param int $recordId 记录ID
+ * @return bool
+ */
+function db_mark_record_as_deleted($recordId)
+{
+    global $config;
+
+    if (empty($config['db']['enable'])) {
+        return false;
+    }
+
+    try {
+        $db = Database::getInstance();
+        $db->update('records', ['is_deleted' => 1], 'id = :id', ['id' => $recordId]);
+        return true;
+    } catch (Exception $e) {
+        error_log('db_mark_record_as_deleted failed: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * 执行数据库版本的过期图片清理
+ * @param bool $deleteFiles 是否同时删除实际文件
+ * @return array ['deleted' => 删除数量, 'errors' => 错误数量]
+ */
+function db_cleanup_expired_images($deleteFiles = true)
+{
+    global $config;
+
+    $result = ['deleted' => 0, 'errors' => 0, 'details' => []];
+
+    if (empty($config['db']['enable'])) {
+        $result['details'][] = '数据库未启用';
+        return $result;
+    }
+
+    if (!$config['image_expiration_enable'] || !$config['image_expiration_cleanup_enable']) {
+        $result['details'][] = '图片过期功能或自动清理未启用';
+        return $result;
+    }
+
+    $expiredRecords = db_get_expired_records();
+
+    if (empty($expiredRecords)) {
+        $result['details'][] = '没有找到过期图片';
+        return $result;
+    }
+
+    $result['details'][] = '找到 ' . count($expiredRecords) . ' 条过期记录';
+
+    foreach ($expiredRecords as $record) {
+        // 删除实际文件
+        if ($deleteFiles) {
+            $filePath = APP_ROOT . $record['path'];
+            if (file_exists($filePath)) {
+                if (@unlink($filePath)) {
+                    $result['details'][] = "已删除文件: {$record['path']}";
+                } else {
+                    $result['details'][] = "删除文件失败: {$record['path']}";
+                    $result['errors']++;
+                    continue;
+                }
+            } else {
+                $result['details'][] = "文件不存在(跳过): {$record['path']}";
+            }
+
+            // 同时删除缩略图
+            $thumbPath = APP_ROOT . '/cache/' . pathinfo($record['path'], PATHINFO_FILENAME) . '_thumb.' . pathinfo($record['path'], PATHINFO_EXTENSION);
+            if (file_exists($thumbPath)) {
+                @unlink($thumbPath);
+            }
+        }
+
+        // 软删除数据库记录
+        if (db_mark_record_as_deleted($record['id'])) {
+            $result['deleted']++;
+            $result['details'][] = "已标记删除记录: {$record['filename']}";
+        } else {
+            $result['errors']++;
+            $result['details'][] = "标记删除失败: {$record['filename']}";
+        }
+    }
+
+    return $result;
 }
