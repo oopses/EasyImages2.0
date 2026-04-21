@@ -141,13 +141,12 @@ if (!empty($login_script)) echo "<script>" . $login_script . "</script>";
     </div>
 </section>
 
-<script type="application/javascript" src="<?php static_cdn(); ?>/public/static/crypto/SHA256.js"></script>
 <script>
     function md5_post() {
         var raw_pwd = document.getElementById('raw_password');
         var hidden_pwd = document.getElementById('md5_password');
-        // ✅ 修复 issue #264：强制转为小写，确保与后端配置匹配
-        hidden_pwd.value = SHA256(raw_pwd.value).toLowerCase();
+        // 直接发送原始密码，由服务器端 bcrypt 验证
+        hidden_pwd.value = raw_pwd.value;
         raw_pwd.value = "Null";
         return true;
     }

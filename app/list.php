@@ -62,21 +62,21 @@ if ($config['ad_top']) echo $config['ad_top_info'];
             ?>
                 <div class="col-lg-3 col-md-4 col-sm-6 col-xs-12">
                   <div class="card">
-                    <li><img src="<?php static_cdn(); ?>/public/images/loading.svg" data-image="<?php echo creat_thumbnail_by_list($imgUrl); ?>" data-original="<?php echo $imgUrl; ?>" alt="简单图床-EasyImage"></li>
+                    <li><img src="<?php static_cdn(); ?>/public/images/loading.svg" data-image="<?php echo htmlspecialchars(creat_thumbnail_by_list($imgUrl), ENT_QUOTES, 'UTF-8'); ?>" data-original="<?php echo htmlspecialchars($imgUrl, ENT_QUOTES, 'UTF-8'); ?>" alt="简单图床-EasyImage"></li>
                     <div class="bottom-bar">
-                      <a href="<?php echo $linkUrl; ?>" target="_blank"><i class="icon icon-picture" data-toggle="tooltip" title="打开" style="margin-left:10px;"></i></a>
-                      <a href="#" class="copy" data-clipboard-text="<?php echo $linkUrl; ?>" data-toggle="tooltip" title="复制链接" style="margin-left:10px;"><i class="icon icon-copy"></i></a>
+                      <a href="<?php echo htmlspecialchars($linkUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank"><i class="icon icon-picture" data-toggle="tooltip" title="打开" style="margin-left:10px;"></i></a>
+                      <a href="#" class="copy" data-clipboard-text="<?php echo htmlspecialchars($linkUrl, ENT_QUOTES, 'UTF-8'); ?>" data-toggle="tooltip" title="复制链接" style="margin-left:10px;"><i class="icon icon-copy"></i></a>
                       <?php if ($config['show_exif_info'] || is_who_login('admin')) : ?>
-                        <a href="/app/info.php?img=<?php echo $relative_path; ?>" data-toggle="tooltip" title="详细信息" target="_blank" style="margin-left:10px;"><i class="icon icon-info-sign"></i></a>
+                        <a href="/app/info.php?img=<?php echo htmlspecialchars($relative_path, ENT_QUOTES, 'UTF-8'); ?>" data-toggle="tooltip" title="详细信息" target="_blank" style="margin-left:10px;"><i class="icon icon-info-sign"></i></a>
                       <?php endif; ?>
-                      <a href="/app/down.php?dw=<?php echo $relative_path; ?>" data-toggle="tooltip" title="下载文件" target="_blank" style="margin-left:10px;"><i class="icon icon-cloud-download"></i></a>
+                      <a href="/app/down.php?dw=<?php echo htmlspecialchars($relative_path, ENT_QUOTES, 'UTF-8'); ?>" data-toggle="tooltip" title="下载文件" target="_blank" style="margin-left:10px;"><i class="icon icon-cloud-download"></i></a>
                       <?php if (!empty($config['report'])) : ?>
-                        <a href="<?php echo $config['report'] . '?Website1=' . $linkUrl; ?>" target="_blank"><i class="icon icon-question-sign" data-toggle="tooltip" title="举报文件" style="margin-left:10px;"></i></a>
+                        <a href="<?php echo htmlspecialchars($config['report'], ENT_QUOTES, 'UTF-8') . '?Website1=' . urlencode($linkUrl); ?>" target="_blank"><i class="icon icon-question-sign" data-toggle="tooltip" title="举报文件" style="margin-left:10px;"></i></a>
                       <?php endif; ?>
                       <?php if (is_who_login('admin')) : ?>
-                        <a href="#" onclick="ajax_post('<?php echo $relative_path; ?>','recycle')" data-toggle="tooltip" title="回收文件" style="margin-left:10px;"><i class="icon icon-undo"></i></a>
-                        <a href="#" onclick="ajax_post('<?php echo $relative_path; ?>')" data-toggle="tooltip" title="删除文件" style="margin-left:10px;"><i class="icon icon-trash"></i></a>
-                        <label class="text-primary"><input type="checkbox" id="url" name="checkbox" value="<?php echo $relative_path; ?>"> 选择</label>
+                        <a href="#" onclick="ajax_post('<?php echo htmlspecialchars($relative_path, ENT_QUOTES, 'UTF-8'); ?>','recycle')" data-toggle="tooltip" title="回收文件" style="margin-left:10px;"><i class="icon icon-undo"></i></a>
+                        <a href="#" onclick="ajax_post('<?php echo htmlspecialchars($relative_path, ENT_QUOTES, 'UTF-8'); ?>')" data-toggle="tooltip" title="删除文件" style="margin-left:10px;"><i class="icon icon-trash"></i></a>
+                        <label class="text-primary"><input type="checkbox" id="url" name="checkbox" value="<?php echo htmlspecialchars($relative_path, ENT_QUOTES, 'UTF-8'); ?>"> 选择</label>
                       <?php endif; ?>
                     </div>
                   </div>
@@ -168,6 +168,9 @@ if ($config['ad_top']) echo $config['ad_top_info'];
   <script type="application/javascript" src="<?php static_cdn(); ?>/public/static/zui/lib/clipboard/clipboard.min.js"></script>
   <script type="application/javascript" src="<?php static_cdn(); ?>/public/static/zui/lib/datetimepicker/datetimepicker.min.js"></script>
   <script>
+    // CSRF Token
+    var csrfToken = '<?php echo htmlspecialchars(generate_csrf_token(), ENT_QUOTES, 'UTF-8'); ?>';
+
     // viewjs
     new Viewer(document.getElementById('viewjs'), {
       url: 'data-original',
@@ -192,7 +195,8 @@ if ($config['ad_top']) echo $config['ad_top_info'];
           if (result == true) {
             $.post("del.php", {
                 url: url,
-                mode: mode
+                mode: mode,
+                csrf_token: csrfToken
               },
               function(data, status) {
                 console.log(data)

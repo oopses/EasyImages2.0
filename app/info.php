@@ -189,9 +189,9 @@ if ($config['ad_top']) echo $config['ad_top_info'];
             <?php if ($logs[$logsName]['port'] != 0) : for ($i = 0; $i <= 7; $i++) : $randName = array_rand($logs, 1) ?>
 
                     <div class="col-md-3">
-                        <a class="card" href="?img=<?php echo $logs[$randName]['path']; ?>" target="_blank">
-                            <img src="thumb.php?img=<?php echo $logs[$randName]['path']; ?>" width="100%">
-                            <div class="caption"><?php echo  $logs[$randName]['source']; ?></div>
+                        <a class="card" href="?img=<?php echo htmlspecialchars($logs[$randName]['path'], ENT_QUOTES, 'UTF-8'); ?>" target="_blank">
+                            <img src="thumb.php?img=<?php echo htmlspecialchars($logs[$randName]['path'], ENT_QUOTES, 'UTF-8'); ?>" width="100%">
+                            <div class="caption"><?php echo htmlspecialchars($logs[$randName]['source'], ENT_QUOTES, 'UTF-8'); ?></div>
                         </a>
                     </div>
                 <?php endfor; ?>
