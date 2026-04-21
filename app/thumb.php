@@ -81,7 +81,10 @@ if (isset($_GET['img'])) {
 
     // 引入文件
     require_once __DIR__ . '/TimThumb.php';
-    $src = $_GET['img'];
+    $src = strip_tags($_GET['img']);
+
+    // 禁止路径穿越字符
+    $src = str_replace(['../', '..\\', './', '.\\'], '', $src);
 
     // 重定向不包含存储路径的缩略图地址
     if (!stristr($src, $config['path'])) {
@@ -91,7 +94,17 @@ if (isset($_GET['img'])) {
     }
 
     // 图片绝对路径
-    $src = APP_ROOT . $_GET['img'];
+    $full_path = realpath(APP_ROOT . $src);
+    $allowed_dir = realpath(APP_ROOT . $config['path']) ?: (APP_ROOT . $config['path']);
+
+    // 验证路径必须在允许目录内
+    if (!$full_path || strpos($full_path, $allowed_dir) !== 0) {
+        header("Content-type: image/png");
+        exit(file_get_contents(APP_ROOT . '/public/images/404.png', true));
+    }
+
+    $src = $full_path;
+
     // 获取文件后缀
     $ext =  pathinfo($src)['extension'];
     // 404 文件

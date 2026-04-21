@@ -109,6 +109,41 @@ function _login_oidc($user = null)
  * 返回参数解析 code=>状态码 200成功，400失败; 登录用户级别level => 0无状态, 1管理员, 2上传者, messege => 提示信息
  */
 
+/**
+ * 生成 CSRF 令牌
+ * @return string 32位十六进制令牌
+ */
+function generate_csrf_token()
+{
+    if (!isset($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+/**
+ * 验证 CSRF 令牌
+ * @param string $token 要验证的令牌
+ * @return bool
+ */
+function verify_csrf_token($token)
+{
+    if (!isset($_SESSION['csrf_token'])) {
+        return false;
+    }
+    return hash_equals($_SESSION['csrf_token'], $token);
+}
+
+/**
+ * 获取 CSRF 表单隐藏字段 HTML
+ * @return string
+ */
+function csrf_field()
+{
+    $token = generate_csrf_token();
+    return '<input type="hidden" name="csrf_token" value="' . htmlspecialchars($token, ENT_QUOTES, 'UTF-8') . '">';
+}
+
 function _login($user = null, $password = null)
 {
     global $config;
@@ -144,17 +179,24 @@ function _login($user = null, $password = null)
                     return json_encode(array('code' => 200, 'level' => 2, 'messege' => $browser_cookie[0] . '用户已登录'));
                 }
             } else {
-                // 传统密码登录验证
-                // 判断是否管理员
-                if ($browser_cookie[0] === $config['user'] && $browser_cookie[1] === $config['password']) return json_encode(array('code' => 200, 'level' => 1, 'messege' => '尊敬的管理员'));
-                // 判断是否上传者
-                if (array_key_exists($browser_cookie[0], $guestConfig) && $browser_cookie[1] === $guestConfig[$browser_cookie[0]]['password']) {
-                    // 判断上传者是否过期
-                    if ($guestConfig[$browser_cookie[0]]['expired'] < time()) {
-                        // 上传者账户密码正确,但是账户过期
-                        return json_encode(array('code' => 400, 'level' => 0, 'messege' => $browser_cookie[0] . '账号已过期'));
+                // 安全会话令牌验证（不存储明文密码）
+                // 管理员验证
+                if ($browser_cookie[0] === $config['user']) {
+                    $expectedToken = _generate_session_token($config['user']);
+                    if ($browser_cookie[1] === $expectedToken) {
+                        return json_encode(array('code' => 200, 'level' => 1, 'messege' => '尊敬的管理员'));
                     }
-                    return json_encode(array('code' => 200, 'level' => 2, 'messege' => $browser_cookie[0] . '用户已登录'));
+                }
+                // 上传者验证
+                if (array_key_exists($browser_cookie[0], $guestConfig)) {
+                    $expectedToken = _generate_session_token($browser_cookie[0]);
+                    if ($browser_cookie[1] === $expectedToken) {
+                        // 判断上传者是否过期
+                        if ($guestConfig[$browser_cookie[0]]['expired'] < time()) {
+                            return json_encode(array('code' => 400, 'level' => 0, 'messege' => $browser_cookie[0] . '账号已过期'));
+                        }
+                        return json_encode(array('code' => 200, 'level' => 2, 'messege' => $browser_cookie[0] . '用户已登录'));
+                    }
                 }
             }
 
@@ -166,19 +208,21 @@ function _login($user = null, $password = null)
     // 前端验证
     $user = strip_tags($user);
     $password = strip_tags($password);
-    // 是否管理员
-    if ($user === $config['user'] && $password === $config['password']) {
-        // 将账号密码序列化后存储
-        $browser_cookie = json_encode(array($user, $password));
+    // 是否管理员 (使用 password_verify 验证 bcrypt 哈希)
+    if ($user === $config['user'] && password_verify($password, $config['password'])) {
+        // 生成安全会话令牌，不存储明文密码
+        $session_token = _generate_session_token($user);
+        $browser_cookie = json_encode(array($user, $session_token));
         setcookie('auth', $browser_cookie, time() + 3600 * 24 * 14, '/');
         return json_encode(array('code' => 200, 'level' => 1, 'messege' => '管理员登录成功'));
     }
-    // 是否上传者
-    if (array_key_exists($user, $guestConfig) && $password === $guestConfig[$user]['password']) {
+    // 是否上传者 (使用 password_verify 验证 bcrypt 哈希)
+    if (array_key_exists($user, $guestConfig) && password_verify($password, $guestConfig[$user]['password'])) {
         // 上传者账号过期
         if ($guestConfig[$user]['expired'] < time()) return json_encode(array('code' => 400, 'level' => 0, 'messege' => $user . '账号已过期'));
-        // 未过期设置cookie
-        $browser_cookie = json_encode(array($user, $password));
+        // 未过期设置cookie，生成安全会话令牌
+        $session_token = _generate_session_token($user);
+        $browser_cookie = json_encode(array($user, $session_token));
         setcookie('auth', $browser_cookie, time() + 3600 * 24 * 14, '/');
         return json_encode(array('code' => 200, 'level' => 2, 'messege' => $user . '用户登录成功'));
     }
@@ -192,6 +236,18 @@ function _login($user = null, $password = null)
 
     // 未知错误
     return json_encode(array('code' => 400, 'level' => 0, 'messege' => '未知错误'));
+}
+
+/**
+ * 生成安全会话令牌
+ * @param string $user 用户名
+ * @return string 64位十六进制令牌
+ */
+function _generate_session_token($user)
+{
+    global $config;
+    $secret = 'easyimage_session_secret_key_' . APP_VERSION;
+    return hash('sha256', $user . $secret);
 }
 
 /**
@@ -232,25 +288,25 @@ function checkLogin()
             }
             return 203; // 密码错误（实际上是无效的 OIDC 令牌）
         } else {
-            // 传统密码登录验证
-            // 密码错误
-            if ($getCOK[1] !== $config['password'] && $getCOK[1] !== $guestConfig[$getCOK[0]]['password']) {
-                return 203;
-            }
-
-            // 管理员登陆
-            if ($getCOK[0] === $config['user'] && $getCOK[1] === $config['password']) {
-                return 204;
-            }
-
-            // 上传者账号登陆
-            if ($getCOK[1] === $guestConfig[$getCOK[0]]['password']) {
-                if ($guestConfig[$getCOK[0]]['expired'] < time()) {
-                    // 上传者账号过期
-                    return 206;
+            // 安全会话令牌验证
+            // 管理员验证
+            if ($getCOK[0] === $config['user']) {
+                $expectedToken = _generate_session_token($config['user']);
+                if ($getCOK[1] === $expectedToken) {
+                    return 204;
                 }
-                return 205;
             }
+            // 上传者验证
+            if (array_key_exists($getCOK[0], $guestConfig)) {
+                $expectedToken = _generate_session_token($getCOK[0]);
+                if ($getCOK[1] === $expectedToken) {
+                    if ($guestConfig[$getCOK[0]]['expired'] < time()) {
+                        return 206;
+                    }
+                    return 205;
+                }
+            }
+            return 203;
         }
     }
 }

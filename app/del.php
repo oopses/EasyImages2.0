@@ -19,6 +19,19 @@ if (empty($_REQUEST)) {
     ), JSON_UNESCAPED_UNICODE));
 }
 
+// CSRF 保护 - 仅对 POST 请求验证
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $csrf_token = $_POST['csrf_token'] ?? $_POST['csrf'] ?? '';
+    if (!verify_csrf_token($csrf_token)) {
+        exit(json_encode(array(
+            'code' => 403,
+            'msg'  => 'CSRF验证失败，请刷新页面后重试',
+            'type' => 'danger',
+            'icon' => 'exclamation-sign'
+        ), JSON_UNESCAPED_UNICODE));
+    }
+}
+
 
 // 解密删除
 if (isset($_GET['hash'])) {

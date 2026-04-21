@@ -2520,12 +2520,16 @@ class Upload {
             // checks MIME type with shell if unix access is authorized
             if (!$this->file_src_mime || !is_string($this->file_src_mime) || empty($this->file_src_mime) || strpos($this->file_src_mime, '/') === false) {
                 if ($this->mime_file) {
-                    $this->log .= '- checking MIME type with UNIX file() command<br />';
-                    if (substr(PHP_OS, 0, 3) != 'WIN') {
-                        if ($this->function_enabled('exec') && $this->function_enabled('escapeshellarg')) {
-                            if (strlen($mime = @exec("file -bi ".escapeshellarg($this->file_src_pathname))) != 0) {
+                    $this->log .= '- checking MIME type with finfo_file()<br />';
+                    // 使用 PHP 内置 finfo_file() 替代 shell exec，更安全
+                    if ($this->function_enabled('finfo_file')) {
+                        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                        if ($finfo) {
+                            $mime = finfo_file($finfo, $this->file_src_pathname);
+                            finfo_close($finfo);
+                            if ($mime && strlen($mime) > 0) {
                                 $this->file_src_mime = trim($mime);
-                                $this->log .= '&nbsp;&nbsp;&nbsp;&nbsp;MIME type detected as ' . $this->file_src_mime . ' by UNIX file() command<br />';
+                                $this->log .= '&nbsp;&nbsp;&nbsp;&nbsp;MIME type detected as ' . $this->file_src_mime . ' by finfo_file()<br />';
                                 if (preg_match("/^([\.\w-]+)\/([\.\w-]+)(.*)$/i", $this->file_src_mime)) {
                                     $this->file_src_mime = preg_replace("/^([\.\w-]+)\/([\.\w-]+)(.*)$/i", '$1/$2', $this->file_src_mime);
                                     $this->log .= '-&nbsp;MIME validated as ' . $this->file_src_mime . '<br />';
@@ -2533,16 +2537,16 @@ class Upload {
                                     $this->file_src_mime = null;
                                 }
                             } else {
-                                $this->log .= '&nbsp;&nbsp;&nbsp;&nbsp;UNIX file() command failed<br />';
+                                $this->log .= '&nbsp;&nbsp;&nbsp;&nbsp;finfo_file() returned empty result<br />';
                             }
                         } else {
-                            $this->log .= '&nbsp;&nbsp;&nbsp;&nbsp;PHP exec() function is disabled<br />';
+                            $this->log .= '&nbsp;&nbsp;&nbsp;&nbsp;finfo_open() failed<br />';
                         }
                     } else {
-                        $this->log .= '&nbsp;&nbsp;&nbsp;&nbsp;UNIX file() command not availabled<br />';
+                        $this->log .= '&nbsp;&nbsp;&nbsp;&nbsp;PHP finfo_file() function is not available<br />';
                     }
                 } else {
-                    $this->log .= '- UNIX file() command is deactivated<br />';
+                    $this->log .= '- MIME type detection is deactivated<br />';
                 }
             }
 

@@ -3,11 +3,17 @@
 /** 禁止直接访问 */
 defined('APP_ROOT') ?: exit;
 
-// 开启 DEBUG 2023-04-03
-if (!ini_get('display_errors')) {
-    ini_set('display_errors', 'On');
+// DEBUG 模式由配置文件控制，默认关闭
+global $config;
+if (!empty($config['debug'])) {
+    if (!ini_get('display_errors')) {
+        ini_set('display_errors', 'On');
+    }
+    error_reporting(E_ALL);
+} else {
+    ini_set('display_errors', 'Off');
+    error_reporting(0);
 }
-error_reporting(E_ALL);
 
 // 检查当前PHP版本是否大于7.0
 if (PHP_VERSION < 7) {
